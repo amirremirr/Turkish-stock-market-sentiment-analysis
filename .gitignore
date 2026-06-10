@@ -1,0 +1,55 @@
+# ── Data files ────────────────────────────────────────────────────────────────
+finance_sentiment.db
+*.png
+!docs/*.png
+labels_to_validate*.csv
+benchmark_llm_results.csv
+*.xlsx
+
+# ── Credentials / environment ─────────────────────────────────────────────────
+.env
+
+# ── Python artefacts ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Editor / IDE ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Pipeline logs ─────────────────────────────────────────────────────────────
+logs/
+
+# ── Claude / AI tooling ───────────────────────────────────────────────────────
+.claude/
+
+# ── Task Scheduler XML (contain personal paths) ───────────────────────────────
+task_export.xml
+task_modified.xml
+register_task.bat
+
+# ── Superseded by run_scheduled.py (contains hardcoded personal paths) ────────
+run_scheduled.bat
+
+# ── Generated reports (JSON snapshots) — commit .md summaries if you want ─────
+reports/*.json
+
+# ── Generated dashboard (rebuilt from DB every run) ───────────────────────────
+dashboard.html
+
+# ── Personal utility / scratch scripts ────────────────────────────────────────
+_av_search.py
+_fix_encoding.py
+other_headlines.txt
+candidate_feeds.txt
