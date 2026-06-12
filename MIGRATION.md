@@ -16,7 +16,7 @@ becomes **walk-forward from day one** (not a post-hoc audit layer).
 | 0 | Hardening: experiment registry, feature flags, rolling backups | ✅ done 2026-06-12 |
 | 1 | Temporal alignment: `signal_date`, dual aggregation, dual L5 | ✅ done 2026-06-12 |
 | 2 | Event schema + dual-write bridge (`events`, `event_entities`, `events_bridge.py`, `migrate-events`) | ✅ done 2026-06-12 — 755 events |
-| 3 | KAP Tier-A ingestion (REST API spike → `ingest/kap.py`) | ⏳ next — needs API research spike |
+| 3 | KAP Tier-A ingestion (`kap_ingest.py` via MKK API Portal) | 🟡 built & dry-run validated 2026-06-13 — **awaiting production access** (dev gateway serves a late-2023 sample dataset; `KAP_ENABLED=False` until then; email kapdestek@mkk.com.tr for prod) |
 | 4 | Structured extraction (direction/magnitude/event_type/entities replaces 3-class sentiment) | pending |
 | 5 | Session windows W1/W2/W3 (`session_features` table) | pending |
 | 6 | Entity linking + free-float cap weights | pending |

@@ -145,6 +145,12 @@ CREATE TABLE IF NOT EXISTS event_entities (
     PRIMARY KEY (event_id, entity_type, entity_id)
 );
 
+-- Generic key/value state (e.g. KAP ingestion cursor)
+CREATE TABLE IF NOT EXISTS kv_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +178,7 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("headlines", "published_hour", "INTEGER"),  # Istanbul local hour (0-23), UTC+3
     ("headlines", "relevance",      "REAL"),     # LLM relevance grade 0.0-1.0 (NULL = ungraded -> 1.0)
     ("headlines", "signal_date",    "TEXT"),     # first trading session that can react (trading_calendar.signal_date)
+    ("events",    "external_id",    "TEXT"),     # e.g. 'kap:1230800' — dedup for non-headline events
 ]
 
 
@@ -189,6 +196,10 @@ def _apply_migrations(con: sqlite3.Connection) -> None:
     # Indexes that depend on migrated columns (created here, not in _DDL).
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_headlines_category ON headlines(category)"
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_external ON events(external_id) "
+        "WHERE external_id IS NOT NULL"
     )
 
 # -- Connection helper ---------------------------------------------------------

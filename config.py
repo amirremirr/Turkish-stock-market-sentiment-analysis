@@ -191,6 +191,18 @@ SOURCE_TIERS = {
 }
 DEFAULT_SOURCE_TIER = "C"
 
+# -- KAP Tier-A ingestion (migration Phase 3) ------------------------------------
+# MKK API Portal credentials in .env: MKK_API_KEY / MKK_API_SECRET (HTTP Basic).
+# IMPORTANT: the dev gateway serves a HISTORICAL SAMPLE dataset (late 2023) —
+# leave KAP_ENABLED=False until production access is granted, or sample-era
+# events would pollute the research store. Validate with:
+#   python main.py kap-ingest --dry-run
+KAP_ENABLED               = False
+KAP_BASE_URL              = "https://apigwdev.mkk.com.tr/api/vyk"
+KAP_DISCLOSURE_TYPES      = ["ODA", "FR"]   # material events + financial reports
+KAP_MAX_DETAILS_PER_RUN   = 30              # detail calls per run (throttle: 6/min)
+KAP_THROTTLE_SECONDS      = 11
+
 # -- Sentiment scoring backend --------------------------------------------------
 # "llm"  : OpenAI gpt-5-mini via API (sentiment_llm.py). Benchmarked 2026-06-12:
 #          84.5% accuracy on held-out human labels vs 76.8% for tuned XLM-R.

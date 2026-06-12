@@ -331,6 +331,27 @@ def cmd_migrate_events(args: argparse.Namespace) -> None:
         print(f"    tier {t[0]}: {t[1]}")
 
 
+def cmd_kap_ingest(args: argparse.Namespace) -> None:
+    """Ingest KAP Tier-A disclosures into the events table (or --dry-run)."""
+    import kap_ingest
+    from config import KAP_ENABLED
+
+    db.init_db(args.db)
+    dry = getattr(args, "dry_run", False)
+    if not KAP_ENABLED and not dry:
+        print("  KAP_ENABLED is False (dev gateway = historical sample data).")
+        print("  Use --dry-run to validate, or enable after production access.")
+        return
+    result = kap_ingest.ingest(db_path=args.db, dry_run=dry)
+    tag = " [DRY RUN — nothing written]" if dry else ""
+    print(f"  {result['new_events']} new Tier-A event(s); cursor at {result['cursor']}{tag}")
+    for ev in result["samples"][:8]:
+        line = (f"    {ev['published_at']} sig={ev['signal_date']} "
+                f"[{ev['event_type']}] {ev['title'][:60]} "
+                f"tickers={ev['tickers']}")
+        print(line.encode("ascii", "replace").decode())
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     db.init_db(args.db)
     stats = db.db_stats(args.db)
@@ -385,6 +406,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Generate the self-contained HTML dashboard (dashboard.html)")
     sub.add_parser("migrate-events", parents=[shared],
                    help="Sync scored headlines into the events table (idempotent)")
+    kap_p = sub.add_parser("kap-ingest", parents=[shared],
+                           help="Ingest KAP Tier-A disclosures into the events table")
+    kap_p.add_argument("--dry-run", action="store_true",
+                       help="Fetch and parse but write nothing (dev-gateway validation)")
 
     clean_p = sub.add_parser(
         "clean",
@@ -447,6 +472,7 @@ _COMMANDS = {
     "status":           cmd_status,
     "dashboard":        cmd_dashboard,
     "migrate-events":   cmd_migrate_events,
+    "kap-ingest":       cmd_kap_ingest,
     "clean":            cmd_clean,
     "export-labels":    cmd_export_labels,
     "validate-labels":  cmd_validate_labels,
