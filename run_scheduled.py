@@ -196,6 +196,20 @@ eval_exit = run([PYTHON, "evaluate.py"], "2/3 evaluate")
 
 run([PYTHON, "dashboard.py"], "3/3 dashboard")
 
+# ── Rolling DB backup (keep last 7 daily copies) ──────────────────────────────
+
+try:
+    import shutil
+    backup_dir = HERE / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    dst = backup_dir / f"daily_{TODAY}.db"
+    shutil.copy2(HERE / "finance_sentiment.db", dst)
+    for old_file in sorted(backup_dir.glob("daily_*.db"))[:-7]:
+        old_file.unlink()
+    log(f"  Backup: {dst.name} (rolling 7)")
+except Exception as exc:
+    log(f"  Warning: backup failed: {exc}")
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 log("=" * 62)

@@ -151,6 +151,7 @@ def score_step(db_path: str = DB_PATH) -> int:
             [(a["relevance"], int(r.id)) for a, r in zip(analyses, rows)],
             db_path=db_path,
         )
+        _sync_events(db_path)
         return len(analyses)
 
     # XLM-R fallback: sentiment only (keyword categories stay).
@@ -163,7 +164,21 @@ def score_step(db_path: str = DB_PATH) -> int:
         in zip(results, unscored.itertuples(index=False))
     ]
     db.batch_update_sentiment(updates, db_path=db_path)
+    _sync_events(db_path)
     return len(updates)
+
+
+def _sync_events(db_path: str) -> None:
+    """Dual-write scored headlines into the events table (migration Phase 2)."""
+    from config import EVENTS_DUAL_WRITE
+    if not EVENTS_DUAL_WRITE:
+        return
+    try:
+        import events_bridge
+        events_bridge.sync(db_path=db_path)
+    except Exception as exc:
+        # The legacy path must never fail because of the new path.
+        logger.warning("events bridge failed (legacy path unaffected): %s", exc)
 
 
 # -----------------------------------------------------------------------------

@@ -167,6 +167,30 @@ RELEVANCE_KEYWORDS = [
     "finansal sonuc",            # financial results announcement
 ]
 
+# -- Event-pipeline migration (see MIGRATION plan in ROADMAP.md) -----------------
+# Feature flags: legacy path stays primary until the new path beats baselines
+# out-of-sample. Never break `run.bat run`.
+USE_EVENT_PIPELINE = False      # flip only after Phase 8 gate passes
+EVENTS_DUAL_WRITE  = True       # mirror scored headlines into the events table
+EXPERIMENT_ID      = "v1-legacy"  # stamped on every pipeline run for provenance
+
+# Source tiers (Phase 3 will add Tier A ingestion — KAP, TCMB, TUIK).
+# A = structured/auditable primary sources, B = wires/official statements,
+# C = general press RSS (sentiment-heavy, noisy).
+SOURCE_TIERS = {
+    "aa_ekonomi":           "B",
+    "aa_politika":          "B",
+    "bloomberght":          "B",
+    "dunya":                "C",
+    "haberturk_ekonomi":    "C",
+    "hurriyet_ekonomi":     "C",
+    "investing_tr_economy": "C",
+    "ntv_ekonomi":          "C",
+    "sabah_ekonomi":        "C",
+    "sozcu_gundem":         "C",
+}
+DEFAULT_SOURCE_TIER = "C"
+
 # -- Sentiment scoring backend --------------------------------------------------
 # "llm"  : OpenAI gpt-5-mini via API (sentiment_llm.py). Benchmarked 2026-06-12:
 #          84.5% accuracy on held-out human labels vs 76.8% for tuned XLM-R.

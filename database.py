@@ -101,6 +101,50 @@ CREATE TABLE IF NOT EXISTS usdtry_rates (
     close  REAL
 );
 
+-- Experiment registry: one row per named research configuration; walk-forward
+-- results are appended into metrics_json (migration Phase 0)
+CREATE TABLE IF NOT EXISTS experiments (
+    experiment_id   TEXT PRIMARY KEY,
+    git_commit      TEXT,
+    schema_version  INTEGER,
+    started_at      TEXT,
+    metrics_json    TEXT
+);
+
+-- Event-centric research store (migration Phase 2). Headlines remain the raw
+-- input; events are the unit of analysis. Tier A sources (KAP/TCMB) will
+-- create events with no headline_id.
+CREATE TABLE IF NOT EXISTS events (
+    event_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    headline_id     INTEGER REFERENCES headlines(id),
+    source_tier     TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    published_at    TEXT NOT NULL,
+    signal_date     TEXT NOT NULL,
+    session_window  TEXT,
+    title           TEXT NOT NULL,
+    raw_text        TEXT,
+    event_type      TEXT,
+    direction       REAL,
+    magnitude       REAL,
+    novelty         REAL,
+    credibility     REAL,
+    sentiment_score REAL,
+    sentiment_label TEXT,
+    model_version   TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_headline ON events(headline_id)
+    WHERE headline_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_signal ON events(signal_date);
+
+CREATE TABLE IF NOT EXISTS event_entities (
+    event_id    INTEGER NOT NULL REFERENCES events(event_id),
+    entity_type TEXT NOT NULL,
+    entity_id   TEXT NOT NULL,
+    PRIMARY KEY (event_id, entity_type, entity_id)
+);
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,6 +163,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 # Columns added after the initial schema (applied via ALTER TABLE at runtime).
 # Tuple: (table_name, column_name, column_definition)
 _MIGRATIONS: List[Tuple[str, str, str]] = [
+    ("pipeline_runs", "experiment_id", "TEXT"),     # provenance (migration Phase 0)
     ("headlines", "category",       "TEXT"),
     ("headlines", "p_positive",     "REAL"),
     ("headlines", "p_neutral",      "REAL"),
@@ -501,12 +546,17 @@ def get_category_daily_sentiment(
 
 # -- Pipeline run audit --------------------------------------------------------
 
-def log_run_start(model_name: Optional[str] = None, db_path: str = DB_PATH) -> int:
+def log_run_start(model_name: Optional[str] = None, db_path: str = DB_PATH,
+                  experiment_id: Optional[str] = None) -> int:
     """Insert a 'running' run record. Returns the new run_id."""
+    if experiment_id is None:
+        from config import EXPERIMENT_ID
+        experiment_id = EXPERIMENT_ID
     with _conn(db_path) as con:
         cur = con.execute(
-            "INSERT INTO pipeline_runs (started_at, model_name, status) VALUES (?, ?, 'running')",
-            (_now_iso(), model_name),
+            "INSERT INTO pipeline_runs (started_at, model_name, status, experiment_id) "
+            "VALUES (?, ?, 'running', ?)",
+            (_now_iso(), model_name, experiment_id),
         )
         return cur.lastrowid  # type: ignore[return-value]
 

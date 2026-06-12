@@ -315,6 +315,22 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
         webbrowser.open(Path(path).resolve().as_uri())
 
 
+def cmd_migrate_events(args: argparse.Namespace) -> None:
+    """One-time (idempotent) sync of all scored headlines into the events table."""
+    import events_bridge
+
+    db.init_db(args.db)
+    n = events_bridge.sync(db_path=args.db)
+    with db._conn(args.db) as con:
+        total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        tiers = con.execute(
+            "SELECT source_tier, COUNT(*) FROM events GROUP BY source_tier"
+        ).fetchall()
+    print(f"  {n} new event(s) created; events total: {total}")
+    for t in tiers:
+        print(f"    tier {t[0]}: {t[1]}")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     db.init_db(args.db)
     stats = db.db_stats(args.db)
@@ -367,6 +383,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status",       parents=[shared], help="Show database statistics")
     sub.add_parser("dashboard",    parents=[shared],
                    help="Generate the self-contained HTML dashboard (dashboard.html)")
+    sub.add_parser("migrate-events", parents=[shared],
+                   help="Sync scored headlines into the events table (idempotent)")
 
     clean_p = sub.add_parser(
         "clean",
@@ -428,6 +446,7 @@ _COMMANDS = {
     "plot":             cmd_plot,
     "status":           cmd_status,
     "dashboard":        cmd_dashboard,
+    "migrate-events":   cmd_migrate_events,
     "clean":            cmd_clean,
     "export-labels":    cmd_export_labels,
     "validate-labels":  cmd_validate_labels,
