@@ -209,6 +209,17 @@ def cmd_export_labels(args: argparse.Namespace) -> None:
         print("  No scored headlines. Run 'python main.py score' first.")
         return
 
+    # Exclude already-labeled headlines (pass the previous labels CSV) so a new
+    # export only contains fresh work.
+    if getattr(args, "exclude", None):
+        try:
+            done_ids = set(pd.read_csv(args.exclude)["id"].astype(int))
+            before_excl = len(df)
+            df = df[~df["id"].astype(int).isin(done_ids)]
+            print(f"  [exclude] Dropped {before_excl - len(df)} already-labeled headlines.")
+        except Exception as exc:
+            print(f"  [!] Could not read exclude file: {exc}")
+
     # Deduplicate on normalized title[:80] so the label set has no near-duplicates.
     # This is important for the 300-500 label path: if the same story appears
     # multiple times (from different sources), we only keep the first occurrence.
@@ -432,6 +443,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=150,
         help="Total headlines to export (split equally across pos/neu/neg, default: 150)",
+    )
+    export_p.add_argument(
+        "--exclude",
+        default=None,
+        help="CSV of already-labeled headlines whose ids should be skipped",
     )
 
     val_p = sub.add_parser(
