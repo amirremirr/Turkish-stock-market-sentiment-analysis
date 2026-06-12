@@ -63,6 +63,21 @@ apply always:
    the neutral class. Optionally add a `notes` column and mark these — they
    make great few-shot examples later.
 
+## Settled judgment calls (decided 2026-06-13, follow these)
+
+Documented while labeling the 300-row canonical set — these are now binding:
+
+| Case | Convention |
+|---|---|
+| Rising FX deposits / dollarization | `negative` (bad for TL sentiment) |
+| Surprise ECB/Fed hike **announcement** | `negative` (global tightening event) |
+| Hike **preview** ("bekleniyor") or currency-**reaction** story | `neutral` |
+| TCMB/Fed hike *expectations* | `negative` (easing deferred — symmetric with "cut expectations = positive"). Note: a hike call can read credibility-positive in the Turkish context; we deliberately chose the symmetry reading. |
+| Foreign bank/investor entering Turkey (e.g. Sber) | `positive` (investment interest beats sanction-exposure angle) |
+| Intra-party turmoil (kurultay calls, internal resignations) | `neutral` / `n` — below the "markets would notice" bar |
+| Arrests/probes of mayors, opposition leaders | `negative` / `y` |
+| Hostile-tone but ambiguous market read | 20-second rule → `neutral` |
+
 ## `human_relevant` — y/n
 
 > "Does this headline belong in a Turkish market-sentiment index at all?"

@@ -284,3 +284,39 @@ rows; they were restored from backup and regraded under this scheme.)
 
 The keyword relevance filter in scraper.py still runs at scrape time as a
 cheap pre-filter; the LLM grade refines it at scoring time.
+
+---
+
+## 14. Label conventions v2 and prompt recalibration (2026-06-13)
+
+The 300-headline label set collected under the written LABELING.md rubric
+revealed a **convention shift**: the original 198 labels were ~26% neutral,
+the new set is 59% neutral (the rubric''s "stuck >20s -> neutral" and
+"foreign-economy data -> neutral" rules bite hard). The two sets disagree
+about where neutral begins and are NOT merged.
+
+**Decision: the 300-row set (labels_validated.csv conventions) is the
+canonical ground truth.** The 198-row set is legacy reference only.
+
+Production scorer recalibrated to the new convention ("prompt p3"):
+- LABELING.md conventions written into the scoring prompt verbatim
+  (neutral-default, Turkey-lens commodities, hike-expectations = negative,
+  dollarization = negative, intra-party politics = neutral, etc.)
+- 30 few-shot examples re-drawn from the canonical set (10/label, seed 42)
+- benchmark_llm.py now imports the production prompt (single source of truth)
+
+Held-out evaluation (270 rows not in the few-shot set):
+
+| Scorer | Accuracy | Direction flips (pos<->neg) |
+|---|---|---|
+| Majority class ("always neutral") | 61.5% | - |
+| Production p2 (pre-recalibration) | 68.5% | ~0 |
+| **Production p3 (recalibrated)** | **83.3%** | **0** |
+
+Relevance grading validated on the same set: 90.7% agreement with human y/n
+at the 0.25 cutoff; only 1/300 human-relevant headlines excluded.
+
+Full history re-scored under p3 (EXPERIMENT_ID v1-p3; pre-rescore backup
+`backups/pre_p3_rescore_2026-06-13.db`). Residual errors are concentrated on
+the neutral boundary (e.g. ministerial PR phrased as investment news) and
+approach the practical inter-annotator ceiling for single-title judgment.

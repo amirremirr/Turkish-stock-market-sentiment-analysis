@@ -172,7 +172,8 @@ RELEVANCE_KEYWORDS = [
 # out-of-sample. Never break `run.bat run`.
 USE_EVENT_PIPELINE = False      # flip only after Phase 8 gate passes
 EVENTS_DUAL_WRITE  = True       # mirror scored headlines into the events table
-EXPERIMENT_ID      = "v1-legacy"  # stamped on every pipeline run for provenance
+EXPERIMENT_ID      = "v1-p3"  # stamped on every pipeline run; bumped 2026-06-13
+                              # with the prompt-p3 recalibration + full re-score
 
 # Source tiers (Phase 3 will add Tier A ingestion — KAP, TCMB, TUIK).
 # A = structured/auditable primary sources, B = wires/official statements,
@@ -243,10 +244,10 @@ SENTIMENT_CONFIDENCE_FLOOR = 0.10
 # Rows BELOW this threshold are excluded from daily aggregates entirely (but
 # never deleted — the grade is auditable and the threshold is tunable).
 # NULL relevance (ungraded rows) is treated as 1.0.
-# PROVISIONAL: the relevance grade and this cutoff are NOT yet validated
-# against human judgment (sentiment is; relevance isn't). The label-export CSV
-# now carries a human_relevant column — once ~300 labels exist, measure
-# agreement before trusting this boundary. See METHODOLOGY §13.
+# VALIDATED 2026-06-13 on 300 human relevance judgments: 90.7% agreement at
+# this cutoff (sweep showed 0.25-0.35 optimal). Errors are asymmetric in the
+# safe direction: only 1/300 relevant headlines excluded; the false-keeps are
+# graded low (avg 0.39) and thus already downweighted. See METHODOLOGY §13.
 RELEVANCE_MIN_FOR_AGGREGATION = 0.25
 
 # -- Visualisation -------------------------------------------------------------

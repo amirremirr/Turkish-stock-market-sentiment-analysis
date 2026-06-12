@@ -42,26 +42,10 @@ OPENAI_MODELS = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"]  # first available
 BATCH_SIZE = 50
 GEMINI_SECONDS_BETWEEN_CALLS = 30   # free tier: 20 requests/day, aggressive throttling
 
-SYSTEM_PROMPT = """\
-You are a financial-news sentiment classifier for the Turkish stock market (BIST 100).
-
-You will receive a numbered list of Turkish financial news headlines. For each one,
-classify the sentiment a Turkish equity investor would read into it:
-
-- "positive": good news for the Turkish economy or market mood (growth, exports up,
-  rate cuts hoped for, records, deals, upgrades, strong earnings)
-- "negative": bad news for the Turkish economy or market mood (inflation up, lira
-  weakness, downgrades, crises, bankruptcies, sanctions, political instability)
-- "neutral": routine reporting with no clear directional read (announcements of data
-  without surprise, schedules, mixed/balanced reports, factual price listings)
-
-Judge market-relevant sentiment, not emotional tone. "Reserves fell slightly as
-expected" is neutral routine reporting, not negative. A record harvest is positive
-even if phrased dryly. If a headline is genuinely ambiguous, choose neutral.
-
-Return a JSON object with a "labels" array containing one entry per headline,
-in the same order, each with the headline's "id" and your "label".
-"""
+# Single source of truth: the PRODUCTION prompt. The benchmark always tests
+# exactly what would ship — any prompt edit in sentiment_llm.py is what gets
+# measured here.
+from sentiment_llm import _SYSTEM_PROMPT_BASE as SYSTEM_PROMPT, PROMPT_VERSION
 
 FEWSHOT_HEADER = """
 
@@ -271,27 +255,19 @@ def main() -> None:
         df = df.dropna(subset=["llm_label"])
 
     # -- Headline numbers ---------------------------------------------------------
-    # model_label in the CSV is XLM-R's raw argmax. The production scorer applies
-    # the tuned +-0.05 thresholds to model_score — recompute that here so the
-    # baseline matches what actually runs in the pipeline.
-    from config import SENTIMENT_POSITIVE_THRESHOLD as POS, SENTIMENT_NEGATIVE_THRESHOLD as NEG
-    df["xlmr_tuned"] = df["model_score"].apply(
-        lambda s: "positive" if s > POS else ("negative" if s < NEG else "neutral")
-    )
-
-    llm_acc        = (df["llm_label"]   == df["human_label"]).mean()
-    xlmr_tuned_acc = (df["xlmr_tuned"]  == df["human_label"]).mean()
-    xlmr_raw_acc   = (df["model_label"] == df["human_label"]).mean()
+    llm_acc      = (df["llm_label"]   == df["human_label"]).mean()
+    csv_baseline = (df["model_label"] == df["human_label"]).mean()
+    majority     = df["human_label"].value_counts(normalize=True).max()
 
     print()
     print("=" * 58)
-    print(f"  {model_used}" + (f"  ({args.fewshot}-shot)" if args.fewshot else "  (zero-shot)"))
+    print(f"  {model_used} prompt {PROMPT_VERSION}"
+          + (f"  ({args.fewshot}-shot)" if args.fewshot else "  (zero-shot)"))
     print(f"      accuracy vs human labels:   {llm_acc:.1%}   (n={len(df)})")
-    print(f"  XLM-RoBERTa, tuned thresholds (production config)")
-    print(f"      accuracy vs human labels:   {xlmr_tuned_acc:.1%}")
-    print(f"  XLM-RoBERTa, raw argmax (for reference)")
-    print(f"      accuracy vs human labels:   {xlmr_raw_acc:.1%}")
-    print(f"  Delta vs production baseline: {llm_acc - xlmr_tuned_acc:+.1%}")
+    print(f"  Baseline: CSV model_label (scorer that produced the export)")
+    print(f"      accuracy vs human labels:   {csv_baseline:.1%}")
+    print(f"  Majority-class baseline (always '{df['human_label'].mode()[0]}'): {majority:.1%}")
+    print(f"  Delta vs CSV baseline: {llm_acc - csv_baseline:+.1%}")
     print("=" * 58)
 
     # -- Confusion matrix -----------------------------------------------------------
@@ -305,11 +281,11 @@ def main() -> None:
 
     # -- Per-category accuracy ----------------------------------------------------------
     if "category" in df.columns:
-        print(f"\n  Per-category accuracy (LLM vs XLM-R tuned):")
+        print(f"\n  Per-category accuracy (new prompt vs CSV baseline):")
         for cat, grp in sorted(df.groupby("category"), key=lambda kv: len(kv[1]), reverse=True):
-            g = (grp["llm_label"]  == grp["human_label"]).mean()
-            x = (grp["xlmr_tuned"] == grp["human_label"]).mean()
-            print(f"    {cat:<22} LLM {g:>6.1%}   XLM-R {x:>6.1%}   (n={len(grp)})")
+            g = (grp["llm_label"]   == grp["human_label"]).mean()
+            b = (grp["model_label"] == grp["human_label"]).mean()
+            print(f"    {cat:<22} new {g:>6.1%}   baseline {b:>6.1%}   (n={len(grp)})")
 
     # -- Disagreement samples ---------------------------------------------------------------
     wrong = df[df["llm_label"] != df["human_label"]]

@@ -1,0 +1,301 @@
+﻿id,source,published_at,category,title,model_label,model_score,model_relevance,human_label,human_relevant
+2014,dunya,2026-06-12,global_risk,Finans devinden piyasalara uyarı: Eski riskler geri dönüyor,negative,-0.7,0.7,negative,y
+1776,aa_ekonomi,2026-06-10,energy_commodities,ABD/İsrail-İran Savaşı'nda petrol arzı kaybının 1 milyar varile ulaştığı hesaplanıyor,negative,-0.7,0.8,negative,y
+265,ntv_ekonomi,2026-04-30,turkey_macro,Enflasyon verileri ne zaman açıklanacak? Ekonomistlerin enflasyon beklentisi belli oldu,neutral,0.0,1.0,neutral,y
+1155,aa_ekonomi,2026-06-04,rates_tcmb,TDT Üye Ülkeleri Merkez (Ulusal) Bankaları Konseyi'nin üçüncü toplantısı 2027'de TCMB ev sahipliğinde yapılacak,positive,0.2,1.0,neutral,y
+1783,aa_ekonomi,2026-06-10,bist_company,Borsa güne düşüşle başladı,negative,-0.4,1.0,negative,y
+53,sabah_ekonomi,2026-05-26,rates_tcmb,Hazine'den yeni borçlanma hamlesi,negative,-0.5,1.0,neutral,y
+1338,dunya,2026-06-08,global_risk,AB'den stratejik sektörlerdeki yabancı yatırımlara sıkı denetim,neutral,0.0,0.7,neutral,y
+1882,investing_tr_economy,2026-06-10,global_risk,"BofA’ya göre euro, Fed yeniden fiyatlama riski artarken düşüşe açık",neutral,0.0,0.7,neutral,y
+973,aa_ekonomi,2026-06-04,turkey_macro,"Türkiye'nin su ürünleri üretimi 2025'te yüzde 11,1 arttı",positive,0.3,1.0,positive,y
+1301,haberturk_ekonomi,2026-06-05,turkey_macro,Maaş zamlarında 5 aylık enflasyon farkı belli oldu,neutral,0.0,1.0,neutral,y
+1798,aa_ekonomi,2026-06-09,bist_company,Borsa günü düşüşle tamamladı,negative,-0.4,1.0,negative,y
+1754,sabah_ekonomi,2026-06-10,bist_company,THY 2026'da da zirvede! Türkiye'nin en değerli markası oldu,positive,0.5,1.0,positive,y
+1986,sozcu_gundem,2026-06-11,other,Amerikalı Richard bambaşka biri çıktı! 2.5 milyon dolarlık vurgun İstanbul'da bitti,negative,-0.4,0.1,negative,n
+1786,aa_ekonomi,2026-06-10,energy_commodities,Ticaret borsalarında 9 ayda 314 bin tonu aşkın fındık işlem gördü,positive,0.2,1.0,neutral,y
+1878,investing_tr_economy,2026-06-11,global_risk,Alman 2 yıllık tahvil getirisi ECB kararı öncesi zirveye yakın,neutral,0.0,0.7,neutral,y
+1593,bloomberght,2026-06-09,global_risk,Citadel’e göre Fed faiz artışı riski yükseldi,negative,-0.4,0.7,negative,y
+1970,haberturk_ekonomi,2026-06-11,energy_commodities,"İran Hürmüz Boğazı'nı kapattı, petrol fiyatı yükseldi",negative,-0.7,0.7,negative,y
+1738,bloomberght,2026-06-10,energy_commodities,"Petrol, ABD’nin İran’a yeni saldırıları sonrası yükseldi",negative,-0.5,0.8,negative,y
+2032,haberturk_ekonomi,2026-06-12,global_risk,Dünya Bankası 2026 küresel büyüme tahminini açıkladı,neutral,0.0,0.7,neutral,y
+251,dunya,2026-06-01,turkey_macro,Ekonomistlerin mayıs ayı enflasyon beklentileri belli oldu,neutral,0.0,1.0,neutral,y
+1976,haberturk_ekonomi,2026-06-10,other,Yapay zekâ girişimine 4 milyon dolar yatırım,positive,0.2,0.4,positive,y
+1210,bloomberght,2026-06-05,turkey_macro,Bakan Şimşek'ten Mayıs ayı enflasyon yorumu,neutral,0.0,1.0,neutral,y
+1044,dunya,2026-06-04,bist_company,Yabancının hisselerden çıkışı 3 haftadır sürüyor,negative,-0.6,1.0,negative,y
+1734,bloomberght,2026-06-10,global_risk,Tahvil yatırımcıları Fed faiz artışına hazırlanıyor,negative,-0.4,0.7,negative,y
+2005,bloomberght,2026-06-12,energy_commodities,"Goldman Sachs, 2027 petrol fiyat beklentisini düşürdü",neutral,0.0,0.7,positive,y
+1894,bloomberght,2026-06-11,global_risk,"S&P, Arjantin’in notunu B-’ye yükseltti",positive,0.4,0.4,neutral,y
+1377,aa_ekonomi,2026-06-08,global_risk,Küresel piyasalar haftaya Orta Doğu'daki gerilimlerin gölgesinde başladı,negative,-0.4,0.7,negative,y
+1099,haberturk_ekonomi,2026-06-03,rates_tcmb,TCMB rezervlerinde düşüş,negative,-0.5,1.0,negative,y
+2019,dunya,2026-06-12,other,Gece saatlerine dikkat: İstanbul için tarih verildi,neutral,0.0,0.0,neutral,n
+46,bloomberght,2026-05-26,global_risk,Almanya'da ihracat beklentileri 1 yılın en düşük seviyesinde,negative,-0.4,0.7,neutral,y
+1255,aa_ekonomi,2026-06-05,turkey_macro,Sanayide çalışan kişi başına üretim endeksi ilk çeyrekte yıllık bazda yüzde 3 arttı,positive,0.3,1.0,positive,y
+1725,investing_tr_economy,2026-06-09,global_risk,"Morgan Stanley, Fed’in faizleri sabit tutmasıyla doların zayıflayacağını öngörüyor",neutral,0.0,0.7,positive,y
+1645,aa_ekonomi,2026-06-09,bist_company,Borsa güne yükselişle başladı,positive,0.4,1.0,positive,y
+1119,dunya,2026-06-05,global_risk,Trump'tan kömür endüstrisine 700 milyon dolarlık destek,positive,0.3,0.7,neutral,y
+1663,hurriyet_ekonomi,2026-06-08,turkey_macro,Hazine ve Maliye Bakanı Mehmet Şimşek'ten CNN Türk'te önemli açıklamalar: Savaş büyük bir arz şoku,negative,-0.5,1.0,negative,y
+1223,dunya,2026-06-05,turkey_macro,Enflasyon verileri geldi: Memur ve emeklide 5 aylık zam tablosu netleşti,neutral,0.0,1.0,neutral,y
+2027,sabah_ekonomi,2026-06-11,banks,"Fitch Ratings'ten Halkbank kararı! ""Finansal kapasite"" notu yükseltildi",positive,0.5,1.0,positive,y
+1602,dunya,2026-06-09,global_risk,Almanya sanayi üretimi nisan ayında tahminleri geride bıraktı,positive,0.4,0.7,neutral,y
+1094,haberturk_ekonomi,2026-06-04,bist_company,Turkcell Akademi’ye “BEST” ödülü,positive,0.1,0.7,neutral,y
+987,aa_ekonomi,2026-06-03,banks,Ziraat Katılım'ın ihraç ettiği sukuk Viyana Borsası'nda işlem görmeye başladı,positive,0.3,1.0,positive,y
+1108,bloomberght,2026-06-04,global_risk,Trump kömür sektörüne 700 milyon dolarlık yatırım açıkladı,positive,0.3,0.7,neutral,y
+1967,haberturk_ekonomi,2026-06-11,energy_commodities,Kiraz ihracatında artış beklentisi,positive,0.2,0.4,positive,y
+469,dunya,2026-06-02,energy_commodities,Altın ve gümüşte beklentiler değişti! Dev banka fiyat tahminlerini düşürdü!,negative,-0.3,0.7,neutral,y
+1113,bloomberght,2026-06-04,energy_commodities,Fındık ihracatı 9 ayda 2 milyar dolara yaklaştı,positive,0.3,1.0,positive,y
+854,bloomberght,2026-06-03,energy_commodities,Güney Kore ve Türk şirketleri modüler reaktör teknolojisinde işbirliği anlaşması imzaladı,positive,0.6,0.7,positive,y
+1366,aa_ekonomi,2026-06-08,turkey_macro,"Otomotiv endüstrisinin mayıs ayı ihracatı 3,2 milyar dolar oldu",positive,0.3,1.0,neutral,y
+837,investing_tr_economy,2026-06-02,global_risk,Kanada doları zayıf verilerle çok haftanın düşüğü yakınında,negative,-0.2,0.4,neutral,y
+326,haberturk_ekonomi,2026-06-01,energy_commodities,"Görüşmeler durdu, petrol fiyatları yeniden yükseldi",negative,-0.6,0.7,negative,y
+2044,sozcu_gundem,2026-06-12,political_risk,AYM'den '128 milyar dolar' kararı,neutral,0.0,1.0,neutral,y
+2001,bloomberght,2026-06-12,energy_commodities,Anlaşma beklentilerine rağmen altında baskı sürüyor,negative,-0.2,0.7,neutral,y
+858,dunya,2026-06-03,global_risk,İngiltere Hazine Bakanlığı yetkilisi Avrupa Birliğine dönüşü kaçınılmaz görüyor,neutral,0.0,0.7,neutral,y
+1221,dunya,2026-06-05,other,TOKİ kurasız 20 bin konut başvuruları ne zaman? TOKİ'nin 20 bin konut projesi hangi illerde inşa edilecek?,neutral,0.0,0.7,neutral,y
+1736,bloomberght,2026-06-10,bist_company,"BYD, Türkiye'de fabrika kuruluşunu askıya aldı",negative,-0.5,0.8,negative,y
+1578,investing_tr_economy,2026-06-09,fx_lira,"Dolar, CPI testi öncesinde risk iştahının artmasıyla 2 aylık zirveden geriledi",positive,0.3,1.0,neutral,y
+1046,dunya,2026-06-04,rates_tcmb,"TCMB rezervleri 159,2 milyar dolara geriledi",negative,-0.6,1.0,negative,y
+1575,sozcu_gundem,2026-06-08,political_risk,Türkiye gönderdi İtalya kapısından sokmadı:  Ciddi kodla uyardılar,negative,-0.3,0.6,negative,y
+283,aa_ekonomi,2026-06-01,global_risk,OECD: Sanayi teşvikleri 2009'dan beri görülen en yüksek seviyede,positive,0.4,0.7,neutral,y
+989,aa_ekonomi,2026-06-03,banks,Ziraat Bankası'ndan dış ticareti desteklemek üzere uzun vadeli dış finansman,positive,0.4,1.0,positive,y
+2037,haberturk_ekonomi,2026-06-11,rates_tcmb,Merkez Bankası faiz kararını açıkladı,neutral,0.0,1.0,neutral,y
+1966,haberturk_ekonomi,2026-06-11,turkey_macro,"Türk müteahhitler yurt dışında 2,3 milyar dolarlık iş üstlendi",positive,0.4,1.0,positive,y
+2041,sozcu_gundem,2026-06-12,political_risk,SON DAKİKA... Silivri Belediyesi’ne “yolsuzluk” operasyonu: Belediye başkanı gözaltında,negative,-0.5,0.7,negative,y
+1774,aa_ekonomi,2026-06-10,bist_company,"Rusya’nın en büyük bankası Sber, Türkiye pazarına teknolojiyle dönmeye hazır",positive,0.4,0.8,positive,y
+1638,aa_ekonomi,2026-06-09,political_risk,"Türkiye-Suriye iş dünyasını bir araya getiren ""AA Kent Ekonomileri Zirvesi"" başladı",positive,0.3,0.8,neutral,y
+291,aa_ekonomi,2026-06-01,turkey_macro,"ASO Başkanı Ardıç, birinci çeyrek büyüme verilerini değerlendirdi",neutral,0.0,0.7,neutral,y
+1988,sozcu_gundem,2026-06-11,other,"Antep fıstığı, kaju veya fındık değil: Dünyanın en değerli kuruyemişi ortaya çıktı",neutral,0.0,0.1,neutral,n
+1069,hurriyet_ekonomi,2026-06-04,other,Bakan Şimşek: Türkiye'ye gelin ve yatırım yapın,positive,0.2,1.0,neutral,y
+1426,haberturk_ekonomi,2026-06-06,other,İstanbul-Çanakkale arası 2 saat olacak,positive,0.3,0.7,positive,y
+242,dunya,2026-06-01,political_risk,CHP'li 111 milletvekilinden 12 Temmuz'da olağanüstü kurultay çağrısı,negative,-0.3,1.0,neutral,n
+1123,dunya,2026-06-04,other,"Apple App Store’un 2025 hacmi 1,4 trilyon doları aştı",positive,0.3,0.4,neutral,y
+1868,sozcu_gundem,2026-06-10,political_risk,SON DAKİKA İYİ Parti'den istifa etmişti: Ersin Beyaz AKP'ye katıldı,neutral,0.0,0.8,neutral,n
+240,bloomberght,2026-06-01,other,SoftBank Fransa'da 75 milyar euroluk veri merkezi yatırımı yapacak,neutral,0.0,0.4,neutral,y
+1608,dunya,2026-06-09,political_risk,Meclis'e gitmeyen Kılıçdaroğlu saat verip çağrı yaptı,neutral,0.0,1.0,neutral,n
+1842,haberturk_ekonomi,2026-06-10,bist_company,BYD Türkiye'deki fabrika yatırımını askıya aldı,negative,-0.6,1.0,negative,y
+1598,bloomberght,2026-06-09,energy_commodities,Altın ateşkes ve Fed beklentileri arasında yatay seyrediyor,neutral,0.0,0.7,neutral,y
+1376,aa_ekonomi,2026-06-08,energy_commodities,IEA: Temiz enerji dönüşümünde toplumsal katılım belirleyici olacak,neutral,0.0,0.7,neutral,y
+1341,sabah_ekonomi,2026-06-08,energy_commodities,Kömür fiyatları 2 yılın zirvesinde: Asya talebi ve arz sorunları piyasayı hareketlendirdi,negative,-0.4,0.7,negative,y
+2026,sabah_ekonomi,2026-06-12,turkey_macro,"Cumhurbaşkanı Yardımcısı Cevdet Yılmaz: Türkiye ekonomisi geçen yıl 1,6 trilyon doları aştı",positive,0.4,1.0,positive,y
+1613,sabah_ekonomi,2026-06-09,banks,Katılım finans verileri tek çatı altında! Türkiye Katılım Finans Veri Merkezi için imzalar atıldı,positive,0.3,1.0,neutral,y
+1344,sabah_ekonomi,2026-06-08,turkey_macro,İstihdamda güçlü artış! Bakan Işıkhan açıkladı: İŞKUR 590 bin kişiyi işe yerleştirdi,positive,0.6,1.0,positive,y
+1875,sozcu_gundem,2026-06-10,global_risk,Hürmüz Boğazı krizi fiyatları vurdu: Petrol için korkutan tahmin!,negative,-0.8,0.7,negative,y
+1871,sozcu_gundem,2026-06-10,other,Çocuğuna bu isimleri verene 4 çeyrek altın verecekler!,neutral,0.0,0.1,neutral,n
+924,haberturk_ekonomi,2026-06-02,bist_company,Doğanlar Holding'e yeni CEO,neutral,0.0,0.7,neutral,y
+1901,dunya,2026-06-11,energy_commodities,"Bal ihracatı 5 ayda 13,5 milyon doları aştı",positive,0.2,0.4,positive,y
+1710,sozcu_gundem,2026-06-09,other,Test sonucu pozitif çıkan Türkan Şoray'ın kızı Yağmur Ünal'dan açıklama,neutral,0.0,0.0,neutral,n
+1303,haberturk_ekonomi,2026-06-05,other,"Çevreye 7 yılda toplam 4,41 milyar TL'lik yatırım",positive,0.3,0.7,positive,y
+848,bloomberght,2026-06-03,turkey_macro,Mayıs'ta Türkiye'de en çok satılan otomobiller,neutral,0.0,0.9,neutral,y
+1647,aa_ekonomi,2026-06-08,other,"Hazine ve Maliye Bakanı Şimşek, gündeme ilişkin açıklamalarda bulundu",neutral,0.0,1.0,neutral,y
+1372,aa_ekonomi,2026-06-08,other,Türkiye küresel havacılıktaki konumuyla göz dolduruyor,positive,0.4,1.0,positive,y
+1300,haberturk_ekonomi,2026-06-05,other,“Doğayla uyumlu büyüyen bir Türkiye için çalışıyoruz”,positive,0.2,0.6,neutral,y
+1373,aa_ekonomi,2026-06-08,banks,Esnaf ve sanatkarlara 2003'ten bu yana 803 milyar lira hazine destekli finansman sağlandı,positive,0.4,1.0,positive,y
+1983,sozcu_gundem,2026-06-11,political_risk,"Kılıçdaroğlu, şarkılarını kullandırmayan sanatçıları kara listeye aldı",neutral,0.0,0.4,neutral,n
+2003,bloomberght,2026-06-12,global_risk,Küresel piyasalarda gündem Trump'ın geri adımı,neutral,0.0,0.7,positive,y
+1116,bloomberght,2026-06-04,banks,"Döviz mevduatları 26 Mayıs haftasında 1,49 milyar dolar arttı",positive,0.2,1.0,negative,y
+1741,dunya,2026-06-10,energy_commodities,Platinde alarm zilleri çalıyor! 1700 doların altı yeni satış dalgasını tetikleyebilir,negative,-0.6,0.7,neutral,y
+1838,haberturk_ekonomi,2026-06-10,crypto,"'Tokenize hisseler 1,6 milyar dolara ulaştı'",positive,0.3,0.7,neutral,y
+2030,sabah_ekonomi,2026-06-11,bist_company,Hazine'den altın tahvili ve kira sertifikası satışı,positive,0.2,1.0,neutral,y
+43,bloomberght,2026-05-26,global_risk,Önümüzdeki üç yılda beklenen ortalama yıllık enflasyon aralıkları ve katılımcıların yüzdesel dağılımı,neutral,0.0,0.7,neutral,y
+1461,sabah_ekonomi,2026-06-08,rates_tcmb,Merkez Bankası haziran ayını pas mı geçecek?,neutral,0.0,1.0,neutral,y
+935,bloomberght,2026-06-04,turkey_macro,"Hizmet Üretici Fiyat Endeksi Mayıs'ta aylık yüzde 3,23 arttı",negative,-0.6,1.0,neutral,y
+1860,sozcu_gundem,2026-06-10,other,Hobi olarak başladı şimdi servet kazanıyor: Kilosu 2 bin lira,positive,0.3,0.1,positive,n
+31,investing_tr_economy,2026-05-26,global_risk,Sterlin bugün: Dolar güçlü seyrederken ateşkes endişeleri sterlini baskıladı,negative,-0.3,0.7,neutral,y
+1448,dunya,2026-06-08,political_risk,İstanbul'da suç örgütlerine darbe: 15 olayın şüphelileri yakalandı,positive,0.3,0.4,neutral,n
+1778,aa_ekonomi,2026-06-10,other,"Avrupa Yatırım Bankası, Türkiye'nin yeşil dönüşüm projeleri için 200 milyon avro finansman sağlayacak",positive,0.5,1.0,positive,y
+838,investing_tr_economy,2026-06-02,global_risk,Euro’nun küresel rolü ABD belirsizliğine rağmen sabit kaldı,neutral,0.0,0.7,neutral,y
+1739,bloomberght,2026-06-10,energy_commodities,"Altın, ABD’nin İran’a yönelik saldırılarının ardından düşüşünü sürdürdü",negative,-0.3,0.8,neutral,y
+2010,bloomberght,2026-06-11,global_risk,"IMF, Euro Bölgesi büyüme tahminlerini düşürdü",negative,-0.6,0.7,neutral,y
+1866,sozcu_gundem,2026-06-10,political_risk,CANLI: Erdoğan ve Kılıçdaroğlu aynı söylemde buluştu...,neutral,0.0,0.8,neutral,n
+468,dunya,2026-06-02,bist_company,Smart Güneş Enerjisi (SMRTG) 10 milyon dolarlık yeni iş anlaşmasına imza attı,positive,0.3,0.9,positive,y
+2017,dunya,2026-06-12,energy_commodities,Petrol için yeni senaryo: Goldman Sachs'tan 2027 tahmini,neutral,0.0,0.7,neutral,y
+1368,aa_ekonomi,2026-06-08,political_risk,"Türk ve Suriyeli bakanlar ""AA Kent Ekonomileri Zirvesi""nde ticari ilişkilerde yeni dönemi değerlendirecek",positive,0.3,1.0,neutral,y
+1965,haberturk_ekonomi,2026-06-11,other,Teknoloji sohbeti için eskortlara saatlik 6 bin dolar,neutral,0.0,0.0,neutral,n
+953,sabah_ekonomi,2026-06-04,global_risk,Fed'in Bej Kitabı'nda Orta Doğu alarmı: Enerji maliyetleri enflasyonun ana tetikledi,negative,-0.7,0.7,negative,y
+1216,bloomberght,2026-06-05,banks,TSB/ Yaşar: Dünya Bankası bina tamamlama sigortasında kredi ve vade konusunda çalışıyor,positive,0.2,0.4,neutral,y
+1421,haberturk_ekonomi,2026-06-08,energy_commodities,İran-İsrail gerilimi petrolü yeniden yükseltti,negative,-0.6,0.7,negative,y
+1990,sozcu_gundem,2026-06-11,political_risk,SON DAKİKA..  28 PM üyesi istifa etti: Kılıçdaroğlu cephesinden olağanüstü kurultay hamlesine ilk yanıt,negative,-0.6,0.7,neutral,n
+1391,hurriyet_ekonomi,2026-06-07,crypto,NPXS coin nedir? Hangi borsalardan alınır? Pundi X[old] ne zaman çıktı? Ne iş yapar?,neutral,0.0,0.4,neutral,n
+2018,dunya,2026-06-12,energy_commodities,Petrol fiyatlarında düşüş eğilimi sürüyor,neutral,0.0,0.7,positive,y
+1903,dunya,2026-06-11,energy_commodities,"Hürmüz krizi petrol akışını durdurdu, OPEC+ artışları gölgede kaldı",negative,-0.6,0.7,negative,y
+2045,sozcu_gundem,2026-06-12,political_risk,27'ler onur istifasıyla tarihe geçti,neutral,0.0,0.8,neutral,n
+1992,sozcu_gundem,2026-06-11,political_risk,Özel'in ekibinden 28 kişi Parti Meclisi'nden istifa etti,negative,-0.5,0.7,neutral,n
+246,dunya,2026-06-01,turkey_macro,"Erdoğan: Ulaşım yatırımları sürecek, 2026'da hedef 188 projeyi tamamlamak",positive,0.4,1.0,positive,y
+1420,haberturk_ekonomi,2026-06-08,energy_commodities,"""Temiz enerji dönüşümünde toplumsal katılım belirleyici olacak""",neutral,0.0,0.7,neutral,y
+1609,dunya,2026-06-09,political_risk,Mansur Yavaş'tan Kemal Kılıçdaroğlu'na çağrı,neutral,0.0,1.0,neutral,n
+937,bloomberght,2026-06-04,energy_commodities,Küresel piyasalara petrolün seyri yön veriyor,neutral,0.0,0.7,neutral,y
+1797,aa_ekonomi,2026-06-09,turkey_macro,"AA Kent Ekonomileri Zirvesi'nde ""Üretim, İhracat ve Gümrüklerde Yeni Dönem"" paneli gerçekleştirildi",neutral,0.0,1.0,neutral,y
+847,bloomberght,2026-06-03,global_risk,Euro Bölgesi'nde bileşik PMI Mayıs'ta 18 ayın en düşük seviyesinde,negative,-0.6,0.7,neutral,y
+1646,aa_ekonomi,2026-06-09,global_risk,Küresel piyasalar toparlanma eğiliminde,positive,0.4,0.7,positive,y
+1556,aa_politika,2026-04-04,political_risk,"MHP Genel Başkanı Bahçeli, Alparslan Türkeş'in kabrini ziyaret etti",neutral,0.0,0.6,neutral,n
+1559,aa_politika,2026-04-03,political_risk,"AK Parti Genel Başkan Yardımcısı Zorlu, TDT Türkistan Gayriresmi Zirvesi’ne ilişkin detayları paylaştı",neutral,0.0,0.6,neutral,n
+1423,haberturk_ekonomi,2026-06-07,energy_commodities,Emtia piyasalarında ABD'nin istihdam verisi sonrası satış baskısı,negative,-0.4,0.7,neutral,y
+1319,bloomberght,2026-06-08,rates_tcmb,Citi'den TCMB analizi,neutral,0.0,1.0,neutral,y
+1259,aa_ekonomi,2026-06-05,global_risk,Küresel piyasalarda gözler ABD'de açıklanacak tarım dışı istihdam verisine çevrildi,neutral,0.0,0.7,neutral,y
+132,dunya,2026-05-26,other,Türkiye-Kuzey Makedonya maçının genel bilet satışları başladı,neutral,0.0,0.1,neutral,n
+1431,investing_tr_economy,2026-06-08,global_risk,Sterlin bugün: Fed sıkılaştırma beklentileri ve teknoloji satışları piyasalara hakim,neutral,0.0,0.7,negative,y
+1637,aa_ekonomi,2026-06-09,global_risk,"Fitch Ratings, küresel ekonomi sektör görünümünü ""kötüleşiyor"" seviyesine düşürdü",negative,-0.6,0.7,negative,y
+1861,sozcu_gundem,2026-06-10,bist_company,Türk otomotiv sektörünün ünlü ismi resmen iflas etti,negative,-0.6,1.0,negative,y
+1985,sozcu_gundem,2026-06-11,political_risk,CHP Parti Meclisi istifaların ardından toplandı,neutral,0.0,0.7,neutral,n
+1390,hurriyet_ekonomi,2026-06-07,crypto,FUN coin nedir? Hangi borsalardan alınır? FUNToken ne zaman çıktı? Ne iş yapar?,neutral,0.0,0.4,neutral,n
+1879,investing_tr_economy,2026-06-11,global_risk,"Avro, ECB kararı öncesinde sakinleşti; piyasalar Orta Doğu’yu izliyor",neutral,0.0,0.7,neutral,y
+332,haberturk_ekonomi,2026-06-01,other,İstanbul Havalimanı'nda yeni rekor,positive,0.6,1.0,positive,y
+2020,dunya,2026-06-12,fx_lira,"Dolar kaç TL oldu, Euro ne kadar? (12 Haziran Cuma Döviz Kurları)",neutral,0.0,1.0,neutral,y
+40,bloomberght,2026-05-26,global_risk,Ekonomi politikalarına duyulan güvene göre enflasyon beklentileri̇,neutral,0.0,0.7,neutral,y
+1579,investing_tr_economy,2026-06-08,global_risk,Wells Fargo Şili ve Arjantin pesosundaki dolar kısa pozisyonlarını kapattı,neutral,0.0,0.4,neutral,y
+1698,aa_politika,2026-04-04,other,TBMM Başkanı Kurtulmuş'tan İlim Yayma Vakfı eğitim danışmanı Ömer Aydın için taziye mesajı,neutral,0.0,0.0,neutral,n
+19,investing_tr_economy,2026-05-22,global_risk,Dolar 6 haftalık zirvede; İran görüşmeleri odakta,negative,-0.5,0.7,negative,y
+1889,bloomberght,2026-06-11,energy_commodities,Petrolde yeniden 150 dolar senaryoları,negative,-0.6,0.7,negative,y
+52,sabah_ekonomi,2026-05-26,energy_commodities,Kakao 3 bin 800 dolardan işlem gördü,neutral,0.0,0.4,neutral,y
+312,hurriyet_ekonomi,2026-04-14,turkey_macro,Cumhurbaşkanı Yardımcısı Yılmaz: Kazakistan ile yatırımların daha yüksek rakamlara ulaşmasını hedefliyoruz,positive,0.4,0.7,neutral,y
+1595,bloomberght,2026-06-09,other,"MSCI, SpaceX'in endekslere hızlı giriş ihtimalini güçlendirdi",positive,0.3,0.4,neutral,y
+1381,aa_ekonomi,2026-06-07,other,"Türkiye, Avrupa Gıda Güvenliği Otoritesince yürütülen kampanyaya bu yıl da katıldı",positive,0.1,0.4,neutral,n
+976,aa_ekonomi,2026-06-04,global_risk,"Küresel piyasalar, jeopolitik riskler ve teknoloji hisselerindeki düşüşle negatif seyrediyor",negative,-0.6,0.7,negative,y
+465,bloomberght,2026-06-02,global_risk,Pimco’ya göre tahvil getiri yükselişi yapay zeka kaynaklı değil,neutral,0.0,0.7,neutral,y
+2016,dunya,2026-06-12,political_risk,Silivri Belediye Başkanı Bora Balcıoğlu gözaltına alındı,negative,-0.5,0.1,negative,y
+272,ntv_ekonomi,2026-04-08,energy_commodities,"Altın fiyatları canlı 8 Nisan 2026: Altın fiyatları ne kadar oldu? Gram, çeyrek, yarım ve cumhuriyet altını alış satış fiyatları",neutral,0.0,0.7,neutral,y
+313,hurriyet_ekonomi,2026-04-09,global_risk,IMF’den büyüme tahminine ilişkin revizyon sinyali,negative,-0.5,0.8,neutral,y
+1118,bloomberght,2026-06-04,rates_tcmb,Yabancılar 26 Mayıs haftasında 135 milyon dolarlık tahvil sattı,negative,-0.4,1.0,negative,y
+850,bloomberght,2026-06-03,turkey_macro,OECD 2026 Türkiye büyüme tahminini aşağı çekti,negative,-0.6,1.0,negative,y
+1158,aa_ekonomi,2026-06-04,energy_commodities,"Ulaştırma ve Altyapı Bakanı Uraloğlu: Türkiye, uydu ihracatçısı ülkeler kategorisine girdi",positive,0.4,1.0,positive,y
+1310,investing_tr_economy,2026-06-08,global_risk,BofA: Şahin BoJ faiz artırımı yen’i yükseltebilir,neutral,0.0,0.7,neutral,y
+1908,sabah_ekonomi,2026-06-11,turkey_macro,"Türk müteahhitlik sektöründen yurt dışında 2,3 milyar dolarlık iş",positive,0.4,1.0,positive,y
+1337,dunya,2026-06-08,global_risk,Japon Yatırımcılar yurt dışı hisse senedi piyasalarından çekiliyor,negative,-0.5,0.7,neutral,y
+1998,investing_tr_economy,2026-06-11,global_risk,"Euro, ECB faiz artırımının ardından geriledi",neutral,0.0,0.7,neutral,y
+1791,aa_ekonomi,2026-06-09,other,"Bakan Kurum, ""COP31 Ev Sahibi Ülke Anlaşması""nı imzaladı",positive,0.4,0.7,neutral,y
+1324,bloomberght,2026-06-08,turkey_macro,İhracat ikliminde ılımlı toparlanma,positive,0.3,1.0,positive,y
+991,aa_ekonomi,2026-06-03,other,Türkiye'nin yatırım potansiyeli Amsterdam'da uluslararası yatırımcılara anlatıldı,positive,0.2,0.7,neutral,y
+328,haberturk_ekonomi,2026-06-01,turkey_macro,Şimşek'ten büyüme değerlendirmesi,neutral,0.0,0.9,neutral,y
+44,bloomberght,2026-05-26,rates_tcmb,"Hazine 1,85 trilyon liralık borçlanmaya gidecek",negative,-0.5,1.0,neutral,y
+1384,aa_ekonomi,2026-06-07,energy_commodities,ABD/İsrail-İran Savaşı'nın 100 gününde değerli metal fiyatları sert satış baskısı altında kaldı,negative,-0.6,0.7,neutral,y
+1425,haberturk_ekonomi,2026-06-07,global_risk,Trump yönetimi OpenAI’de hisse payı almayı değerlendiriyor,neutral,0.0,0.4,neutral,y
+1169,aa_ekonomi,2026-06-04,other,TVF Genel Müdürü Ermut: İslami finansın büyümesini destekleme konusunda kararlıyız,positive,0.2,0.4,neutral,y
+1380,aa_ekonomi,2026-06-07,energy_commodities,"Bakan Bayraktar, Bangladeşli bakanlarla enerji işbirliğini görüştü",positive,0.2,1.0,neutral,y
+852,bloomberght,2026-06-03,turkey_macro,"Citi, 2026'da Türkiye'de büyümenin yavaşlamasını bekliyor",negative,-0.5,1.0,negative,y
+1862,sozcu_gundem,2026-06-10,banks,Banka kartından temassız ödeme yapan yandı,negative,-0.3,0.7,negative,n
+317,hurriyet_ekonomi,2026-04-03,turkey_macro,Kesiad başkanı özken: Türkiye’nin omurgası sanayidir,positive,0.3,0.6,neutral,y
+1688,haberturk_ekonomi,2026-06-09,turkey_macro,Mayısta en fazla getiri faizden,positive,0.2,1.0,neutral,y
+309,hurriyet_ekonomi,2026-04-23,global_risk,Alman ekonomisi büyüme tahmini düştü,negative,-0.6,0.7,neutral,y
+1462,sabah_ekonomi,2026-06-08,banks,"DMM'den ""Devlet artık ödemelerde banka hizmet ücreti alıyor"" iddiasına açıklama",neutral,0.0,0.7,neutral,y
+2022,dunya,2026-06-12,other,SpaceX halka arzı küresel finans tarihinde rekor kırdı,positive,0.6,0.4,neutral,y
+1892,bloomberght,2026-06-11,global_risk,Küresel piyasalarda jeopolitik tansiyon,negative,-0.5,0.7,negative,y
+38,bloomberght,2026-05-26,global_risk,"Avrupa Merkez Bankası, enflasyon ve büyüme tahminlerini güncelleyecek",neutral,0.0,0.7,neutral,y
+1685,hurriyet_ekonomi,2026-04-01,global_risk,Savaş artık petrolün ötesinde: İran’ın yeni silahı! ABD ve İsrail için yeni tehdit…,negative,-0.6,0.7,negative,y
+1340,sabah_ekonomi,2026-06-08,banks,"Vakıf Katılım, tüm bankaların hesap ve kart bilgilerini tek ekranda buluşturuyor",positive,0.3,1.0,neutral,y
+508,aa_ekonomi,2026-06-02,global_risk,Almanya’da yaklaşık her 6 sanayi şirketinden biri tedarik darboğazı yaşıyor,negative,-0.4,0.4,neutral,y
+1740,dunya,2026-06-10,bist_company,Kontrolmatik son 33 ayda piyasa değerinin yaklaşık %93'ünü kaybetti,negative,-0.7,1.0,negative,y
+1706,aa_politika,2026-04-02,other,TBMM Başkanı Kurtulmuş'tan Prof. Dr. Hatemi için başsağlığı mesajı,neutral,0.0,0.0,neutral,n
+1865,sozcu_gundem,2026-06-10,political_risk,İmamoğlu'ndan Kılıçdaroğlu'na sert sözler: 'Saray kayyumu' bu vahim ifadeleri derhal oku,negative,-0.5,0.8,neutral,n
+949,dunya,2026-06-04,energy_commodities,Bakır fiyatları yüksek faiz ve jeopolitik risklerle geriledi,negative,-0.5,0.7,neutral,y
+238,bloomberght,2026-06-01,turkey_macro,İlk çeyrekte sektörel büyüme oranları,neutral,0.0,1.0,neutral,y
+1383,aa_ekonomi,2026-06-07,energy_commodities,"Bakan Bayraktar, Sıfır Atık Forumu'nda enerji verimliliğinde uluslararası işbirliği çağrısında bulundu",positive,0.2,0.7,neutral,y
+333,haberturk_ekonomi,2026-06-01,bist_company,ASELSAN ile SSB arasında 845 milyon dolarlık sözleşme,positive,0.8,1.0,positive,y
+499,aa_ekonomi,2026-06-02,other,Türk şirketlerden Interpack 2026 ve Dünya Özel Markalı Ürünler Fuarı'na yoğun katılım,positive,0.3,0.8,neutral,y
+1733,bloomberght,2026-06-10,energy_commodities,"ABD, petrol fiyatı tahminini yükseltti",neutral,0.0,0.7,negative,y
+2000,bloomberght,2026-06-12,turkey_macro,Cari dengede açık serisi sürüyor,negative,-0.6,1.0,negative,y
+1642,aa_ekonomi,2026-06-09,global_risk,"ECB, enflasyon-resesyon kıskacında faiz kararını açıklayacak",negative,-0.4,0.7,neutral,y
+1328,dunya,2026-06-08,energy_commodities,Enerji piyasasında tansiyon yükseldi: Petrol fiyatları yeniden yükselişte,negative,-0.4,0.8,negative,y
+259,sabah_ekonomi,2026-06-01,energy_commodities,Azerbaycan'dan Türkiye'ye 33 milyar metreküp doğal gaz anlaşması,positive,0.7,1.0,positive,y
+235,bloomberght,2026-06-01,turkey_macro,İnşaat yatırımlarında artış hızı 2 yılın en düşüğünde,negative,-0.5,1.0,negative,y
+1378,aa_ekonomi,2026-06-07,global_risk,"IATA, küresel hava yolu şirketlerinin 2026 kar tahminini yakıt şokuyla yaklaşık yarı yarıya düşürdü",negative,-0.6,0.7,negative,y
+1781,aa_ekonomi,2026-06-10,turkey_macro,Türkiye kruvaziyer pazarındaki hareketlilik 2026 sezonunda yüz güldürüyor,positive,0.3,0.8,positive,y
+1520,hurriyet_ekonomi,2026-05-09,political_risk,İmamoğlu soruşturmasında 6 zanlıya adli kontrol kararı,negative,-0.4,0.7,negative,y
+316,hurriyet_ekonomi,2026-04-04,other,"Bakan Işıkhan: Türkiye, can simidi olmaya devam ediyor",positive,0.3,0.6,neutral,y
+1984,sozcu_gundem,2026-06-11,energy_commodities,Koskoca çukurdan tonlarca 'beyaz altın' çıkıyor,neutral,0.0,0.4,neutral,n
+1989,sozcu_gundem,2026-06-11,other,Türkiye'nin en meşhur ilçeleri belli oldu: Hem tarihi hem turistik,positive,0.2,0.1,neutral,n
+1858,sozcu_gundem,2026-06-10,other,5 liradan satmak istemeyince 4 tonu bedavaya dağıttı,negative,-0.5,0.4,negative,n
+334,haberturk_ekonomi,2026-05-31,political_risk,Ticaret Bakanlığı'ndan '863 milyon liralık reklam cezası' iddialarına yalanlama,neutral,0.0,0.8,neutral,y
+1117,bloomberght,2026-06-04,bist_company,Yabancılar 26 Mayıs haftasında 91 milyon dolarlık hisse sattı,negative,-0.4,1.0,negative,y
+1874,sozcu_gundem,2026-06-10,fx_lira,Yeni güne yeni rekorla başladı! Dolar/TL kuru tırmanıyor,negative,-0.7,1.0,negative,y
+1773,aa_ekonomi,2026-06-10,turkey_macro,ÇAYKUR'un birinci sürgün yaş çay alımları devam ediyor,neutral,0.0,0.6,neutral,y
+1877,sozcu_gundem,2026-06-10,other,Avrupa'dan Türkiye'ye yeşil dönüşüm için 200 milyon euroluk kaynak,positive,0.5,1.0,positive,y
+1314,investing_tr_economy,2026-06-05,global_risk,"Hindistan’ın döviz rezervleri 682,32 milyar dolara yükseldi",neutral,0.0,0.4,neutral,y
+1364,aa_ekonomi,2026-06-08,turkey_macro,ÇAYKUR yaş çay alımına 1 günlük ara verecek,neutral,0.0,1.0,neutral,y
+1363,aa_ekonomi,2026-06-08,global_risk,Orta Doğu'daki savaş AB'nin enerji faturasını 47 milyar avro yükseltti,negative,-0.7,0.7,negative,y
+1154,aa_ekonomi,2026-06-04,other,"Apple'ın uygulama mağazası 1,4 trilyon doları aşan faturalama ve satışa aracılık etti",positive,0.3,0.4,neutral,y
+983,aa_ekonomi,2026-06-03,energy_commodities,"Enerji ve Tabii Kaynaklar Bakanı Bayraktar, 2025'te ""rekor kurulu güç"" sözünün yerine getirildiğini bildirdi",positive,0.5,1.0,positive,y
+1454,dunya,2026-06-08,energy_commodities,Savaş AB'ye 47 milyar euroluk ek enerji faturası çıkardı,negative,-0.6,0.7,negative,y
+1610,dunya,2026-06-09,other,Türkiye müzecilikte Avrupa’nın önüne geçti,positive,0.2,0.4,positive,n
+1564,sozcu_gundem,2026-06-08,other,Dünyanın en büyüleyici 20 doğa harikası: Türkiye’den 2 yer listede,positive,0.1,0.1,positive,n
+2029,sabah_ekonomi,2026-06-11,global_risk,3 politika faizinde şaşırtan karar! ECB 2023'ten bu yana ilk kez artışa gitti,negative,-0.6,0.7,negative,y
+1565,sozcu_gundem,2026-06-08,other,Yapay zekâya göre Türkiye'de en güzel kadınlar bu illerde,neutral,0.0,0.0,neutral,n
+1906,sabah_ekonomi,2026-06-11,bist_company,Yıldız Holding gıda güvenliği süreçlerini 11 ülkede ortak standartlarla yönetiyor,positive,0.2,1.0,neutral,y
+1870,sozcu_gundem,2026-06-10,other,Plajda yalnız başına güneşlenen Türkü Su Demirel yanına gelen kediyi geri çevirmedi,neutral,0.0,0.0,neutral,n
+1721,sozcu_gundem,2026-06-09,global_risk,Türkiye'nin hazinesine Trump göz dikti,negative,-0.6,0.6,neutral,y
+1125,dunya,2026-06-04,turkey_macro,Sigara zamları devam ediyor: BAT sigara grubu ürünlerine de 5 lira zam geldi,negative,-0.4,1.0,negative,y
+1880,investing_tr_economy,2026-06-10,global_risk,Fed faiz artırımı beklentileri dolar zayıflama işlemini zayıflatıyor,neutral,0.0,0.7,negative,y
+1780,aa_ekonomi,2026-06-10,energy_commodities,Küresel LNG ticareti 2025'te yüzde 5 büyüdü,positive,0.3,0.7,neutral,y
+1650,aa_ekonomi,2026-06-08,global_risk,"ABD'li hava yolu şirketlerinin yakıt harcaması nisanda 6,5 milyar dolara ulaştı",negative,-0.2,0.7,neutral,y
+477,sabah_ekonomi,2026-06-02,rates_tcmb,Merkez Bankası rezervleri belli oldu,neutral,0.0,1.0,neutral,y
+1588,bloomberght,2026-06-09,turkey_macro,Türkiye ile Kanada arasında Serbest Ticaret Anlaşması için görüşmeler başlıyor,positive,0.4,1.0,positive,y
+1567,sozcu_gundem,2026-06-08,political_risk,Kılıçdaroğlu'nun grup toplantısı talebi işleme alınmadı,negative,-0.2,0.7,neutral,n
+232,bloomberght,2026-06-01,energy_commodities,"Çin, küresel nadir toprak rezervlerine hakim durumda",negative,-0.3,0.7,neutral,y
+501,aa_ekonomi,2026-06-02,other,Türkiye'nin Sierra Leone'deki yatırımları ülkenin gelişimine katkı sağlıyor,positive,0.3,0.6,neutral,y
+463,bloomberght,2026-06-02,energy_commodities,HSBC: Emtialar 'süper sıkışma' yaşıyor,negative,-0.5,0.7,negative,y
+948,dunya,2026-06-04,global_risk,Dev şirketin hisseleri bir günde 300 milyar dolar eridi,negative,-0.9,0.7,negative,y
+321,hurriyet_ekonomi,2026-03-20,energy_commodities,Fitch’ten Hürmüz Boğazı uyarısı: Petrol fiyatları 120 doları görebilir,negative,-0.7,0.7,negative,y
+943,bloomberght,2026-06-04,fx_lira,"Dolar ne kadar oldu? 4 Haziran 2026, Dolar kurunda son durum ne?",neutral,0.0,1.0,neutral,y
+1570,sozcu_gundem,2026-06-08,other,Dünyanın en iyi tatlısı Türkiye'den: Baklavayı tahtından etti,positive,0.1,0.1,positive,n
+920,haberturk_ekonomi,2026-06-03,other,Avrupa ülkesinden turistlere özel 'hazine avı',positive,0.2,0.1,neutral,n
+1752,sabah_ekonomi,2026-06-10,other,Ankara-İstanbul YHT seferleri yarım saat kısalacak,positive,0.3,0.6,positive,y
+1114,bloomberght,2026-06-04,rates_tcmb,Faiz indirimi beklentisi Eylül'e ötelendi,negative,-0.5,1.0,negative,y
+294,aa_ekonomi,2026-06-01,energy_commodities,TürkAkım'da planlı bakım nedeniyle gaz iletimine ara verilecek,negative,-0.6,0.9,neutral,y
+1571,sozcu_gundem,2026-06-08,global_risk,Almanya sanayisinde alarm zilleri,negative,-0.6,0.7,neutral,y
+234,bloomberght,2026-06-01,turkey_macro,"İstanbul'da tüketici fiyatları Mayıs'ta yüzde 1,53 arttı",negative,-0.5,1.0,neutral,y
+275,ntv_ekonomi,2026-04-01,turkey_macro,Enflasyon verileri ne zaman açıklanacak? 2026 TÜİK mart ayı enflasyon verileri,neutral,0.0,1.0,neutral,y
+1793,aa_ekonomi,2026-06-09,other,"Halep ile Gaziantep sanayi odaları, sanayi işbirliğinde milyarlarca dolarlık proje üzerinde çalışıyor",positive,0.5,0.7,positive,y
+331,haberturk_ekonomi,2026-06-01,energy_commodities,Altın haftaya düşüşle başladı,negative,-0.4,0.8,neutral,y
+1726,investing_tr_economy,2026-06-09,global_risk,"Avrupa tahvil getirileri ECB toplantısı öncesinde geriledi, Orta Doğu riskleri sürüyor",neutral,0.0,0.7,neutral,y
+1788,aa_ekonomi,2026-06-10,global_risk,Küresel piyasalar jeopolitik riskler altında ABD'nin enflasyon verilerine odaklandı,neutral,0.0,0.7,neutral,y
+1648,aa_ekonomi,2026-06-08,global_risk,IATA: Tedarik zinciri sorunları hava yolu sektörüne 11 milyar dolara mal oldu,negative,-0.3,0.7,neutral,y
+1718,sozcu_gundem,2026-06-09,bist_company,Hakan Safi'ye darbe üstüne darbe! 20 milyon eurosu çöpe gitti,negative,-0.6,0.4,negative,y
+1379,aa_ekonomi,2026-06-07,energy_commodities,"OPEC+ üyesi 7 ülke, temmuzda petrol üretimini günlük 188 bin varil artıracak",positive,0.3,0.7,positive,y
+1212,bloomberght,2026-06-05,turkey_macro,"Enflasyon açıklandı, kiralarda zam tavanı belli oldu",neutral,0.0,1.0,neutral,y
+1775,aa_ekonomi,2026-06-10,turkey_macro,Türkiye'nin bu yılki kiraz ihracatında artış beklentisi,positive,0.3,1.0,positive,y
+1909,sabah_ekonomi,2026-06-11,other,"Ruslar, Türkiye'de en çok hangi ilçeden konut alıyor?",neutral,0.0,0.4,neutral,n
+1614,sabah_ekonomi,2026-06-09,turkey_macro,"Türkiye'den Fransa'ya rekor ihracat: 4,3 milyar doları aştı",positive,0.4,1.0,positive,y
+2021,dunya,2026-06-12,energy_commodities,ABD en büyük petrol ihracatçısı konumuna yükseldi,neutral,0.0,0.7,neutral,y
+1229,dunya,2026-06-05,turkey_macro,DUYURULDU! Memur ve memur emeklisi maaş zammı 5 aylık enflasyon farkı kaç oldu? Memur maaşına ne kadar zam gelecek?,neutral,0.0,1.0,neutral,y
+1997,investing_tr_economy,2026-06-12,global_risk,"Dolar, İran barış umutları ve Fed faiz beklentileriyle geriledi",positive,0.3,0.7,positive,y
+939,bloomberght,2026-06-04,other,Kadın CEO’lar Cam Tavanları Kırıyor: Kadın Liderler Yönetim Kurullarında ve Üst Yönetimde Dönüşümü Hızlandırıyor,positive,0.3,0.4,positive,n
+1419,haberturk_ekonomi,2026-06-08,turkey_macro,Otomotiv ihracatı Mayıs'ta geriledi,negative,-0.5,1.0,negative,y
+1649,aa_ekonomi,2026-06-08,bist_company,Borsa günü yükselişle tamamladı,positive,0.4,1.0,positive,y
+20,investing_tr_economy,2026-05-21,global_risk,Fed yetkilileri küresel merkez bankalarına dolar takas hattı genişletmeyi tartışıyor,positive,0.4,0.7,positive,y
+307,hurriyet_ekonomi,2026-04-27,political_risk,Belçika'dan tarihi Türkiye ziyareti öncesi ekonomik entegrasyon vurgusu,positive,0.3,0.6,positive,y
+1891,bloomberght,2026-06-11,global_risk,AMB kararı radarda: 2023'ten beri ilk faiz artışı bekleniyor,negative,-0.4,0.7,neutral,y
+315,hurriyet_ekonomi,2026-04-04,political_risk,Bakan Işıkhan: Türkiye’yi tüm risklere karşı koruyacak her türlü tedbiri alıyoruz,positive,0.3,0.7,neutral,y
+1165,aa_ekonomi,2026-06-04,banks,Bankacılık sektörünün mevduatı geçen hafta arttı,positive,0.2,1.0,neutral,y
+1714,sozcu_gundem,2026-06-09,political_risk,Bahçeli kürsüden Özgür Özel'e çağrı yaptı,neutral,0.0,0.2,neutral,n
+1226,dunya,2026-06-05,bist_company,IEYHO paylarında üç yatırımcıya yaptırım kararı,negative,-0.5,0.8,negative,y
+1973,haberturk_ekonomi,2026-06-10,global_risk,"AB, 2027'de yaklaşık 200 milyar euro bütçe istiyor",neutral,0.0,0.4,neutral,y
+2043,sozcu_gundem,2026-06-12,bist_company,"Yatırımları durdurdu, Togg'u vurdu",negative,-0.7,1.0,negative,y
+1030,bloomberght,2026-06-04,rates_tcmb,TCMB rezervleri 160 milyar doların altına indi,negative,-0.6,1.0,negative,y
+1236,sabah_ekonomi,2026-06-05,turkey_macro,Bakan Şimşek: Türkiye'de kişi başı milli gelir birçok gelişmiş ülkenin üzerinde,positive,0.3,1.0,neutral,y
+1968,haberturk_ekonomi,2026-06-11,energy_commodities,Altın 6 ayın dibinden döndü,positive,0.3,0.7,neutral,y
+1881,investing_tr_economy,2026-06-10,global_risk,"RBC Capital Markets, Kore wonu ticareti yapan ilk Kanada bankası oldu",neutral,0.0,0.4,neutral,y
+2013,dunya,2026-06-12,other,Yasa dışı bahis soruşturmasında 44 gözaltı kararı,neutral,0.0,0.1,neutral,n
+863,dunya,2026-06-03,bist_company,Türk İlaç ve Serum Sanayi konkordato istedi,negative,-0.8,1.0,negative,y
+1712,sozcu_gundem,2026-06-09,other,Mühendisler şehrin altına gizlice yerleştirdi: Tam 44 kilometre boyunca uzanan 'dev solucanlar',neutral,0.0,0.1,neutral,n
+233,bloomberght,2026-06-01,energy_commodities,Petrolde vadeli fiyatlamalar,neutral,0.0,0.7,neutral,y
+1789,aa_ekonomi,2026-06-10,energy_commodities,Küresel deniz üstü rüzgar enerjisi kurulu gücü artıyor,positive,0.3,0.4,neutral,y
+1897,dunya,2026-06-11,bist_company,Matriks'ten sermaye piyasalarına yapay zekâ hamlesi,positive,0.3,1.0,neutral,y
+1991,sozcu_gundem,2026-06-11,political_risk,CHP'li Adnan Beker'in oğlu gözaltına alındı,negative,-0.5,0.7,neutral,n
+1031,bloomberght,2026-06-04,fx_lira,Döviz mevduatlarında hızlı artış,negative,-0.6,1.0,negative,y
+981,aa_ekonomi,2026-06-03,turkey_macro,"Türkiye'nin ham çelik üretimi nisanda yıllık yüzde 9,4 arttı",positive,0.3,1.0,positive,y
+1302,haberturk_ekonomi,2026-06-05,turkey_macro,Mayıs ayı enflasyonu açıklandı,neutral,0.0,1.0,neutral,y
+2036,haberturk_ekonomi,2026-06-11,global_risk,Avrupa Merkez Bankası'ndan faiz artırımı,negative,-0.6,0.7,negative,y
+1886,bloomberght,2026-06-11,rates_tcmb,TCMB faizi değiştirmedi,neutral,0.0,1.0,neutral,y
+1594,bloomberght,2026-06-09,global_risk,BofA: ABD borsasında ‘ayı piyasası’ sinyalleri arttı,negative,-0.5,0.7,negative,y
+322,hurriyet_ekonomi,2026-03-16,other,Şeker ve tatlıda merdiven altına dikkat,neutral,0.0,0.2,neutral,n
+985,aa_ekonomi,2026-06-03,rates_tcmb,"Merkez Bankası rezervleri 160,2 milyar dolar oldu",neutral,0.0,1.0,neutral,y
+1320,bloomberght,2026-06-08,rates_tcmb,"BBVA, TCMB'den bu hafta faiz artışı bekliyor",neutral,0.0,1.0,negative,y
+500,aa_ekonomi,2026-06-02,other,Türkiye-Malezya İslami Sermaye Piyasaları Forumu İstanbul'da başladı,positive,0.2,0.9,neutral,y
+470,dunya,2026-06-02,turkey_macro,Büyümeye en fazla katma değer bilgi ve iletişim sektöründen,positive,0.3,1.0,neutral,y
+1115,bloomberght,2026-06-04,rates_tcmb,TCMB rezervleri 3 haftadır düşüşte,negative,-0.5,1.0,negative,y
+2033,haberturk_ekonomi,2026-06-12,bist_company,Netflix'e Türkiye ayarı,neutral,0.0,1.0,neutral,n
+1034,bloomberght,2026-06-04,fx_lira,ING: Orta Doğu’daki durum ve ABD verileri doları destekliyor,negative,-0.3,0.7,negative,y
+1744,dunya,2026-06-10,bist_company,Türk Telekom’dan milli teknoloji başarısı: SEBA çözümü 1 milyon haneye ulaştı,positive,0.4,1.0,positive,y
+1840,haberturk_ekonomi,2026-06-10,global_risk,Küresel piyasalar ABD'nin enflasyon verilerine odaklandı,neutral,0.0,0.7,neutral,y
+1554,aa_politika,2026-04-04,political_risk,"Cumhurbaşkanı Erdoğan ile Ukrayna Devlet Başkanı Zelenskiy, İstanbul'da bir araya geldi",positive,0.4,0.9,neutral,y
+1981,sozcu_gundem,2026-06-11,political_risk,TBMM Başkanı Numan Kurtulmuş'tan CHP'ye mesaj,neutral,0.0,0.7,neutral,n
+1864,sozcu_gundem,2026-06-10,rates_tcmb,TEPAV'dan TCMB'ye enflasyon çağrısı: Hedeften sapmanın gerekçeleri açıklanmalı,negative,-0.4,1.0,negative,y
+1708,sozcu_gundem,2026-06-09,other,Ayın hazinesini bir kutu süt ağırlığındaki cihazla ortaya çıkaracaklar,neutral,0.0,0.1,neutral,n

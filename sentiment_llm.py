@@ -40,8 +40,10 @@ logger = logging.getLogger(__name__)
 # Bump whenever _SYSTEM_PROMPT_BASE, _ANALYZE_PROMPT_EXTRA, or the few-shot set
 # changes — stored with every scored row (model_name column) so results are
 # attributable to an exact prompt version. History: p1 = launch prompt
-# (2026-06-12 morning), p2 = graded relevance (2026-06-12 evening).
-PROMPT_VERSION = "p2"
+# (2026-06-12 morning), p2 = graded relevance (2026-06-12 evening),
+# p3 = recalibrated to the LABELING.md conventions after the 300-label set
+# (2026-06-13) — neutral-default + the analyst's documented judgment calls.
+PROMPT_VERSION = "p3"
 
 _FEWSHOT_PATH = Path(__file__).parent / "fewshot_examples.json"
 
@@ -60,7 +62,32 @@ classify the sentiment a Turkish equity investor would read into it:
 
 Judge market-relevant sentiment, not emotional tone. "Reserves fell slightly as
 expected" is neutral routine reporting, not negative. A record harvest is positive
-even if phrased dryly. If a headline is genuinely ambiguous, choose neutral.
+even if phrased dryly.
+
+NEUTRAL IS THE DEFAULT. Assign positive/negative only when a Turkish equity
+investor's mood would clearly move. Most routine reporting is neutral.
+
+Conventions our analyst follows — match them exactly:
+- Judge through Turkey's lens. Turkey imports nearly all its energy: oil/gas
+  prices falling = positive; rising = negative. US-specific inventory or
+  production statistics = neutral.
+- Gold/silver/copper price moves = neutral unless explicitly tied to the lira
+  or to crisis flight.
+- Foreign-economy data (German PMI, Eurozone forecasts, other countries'
+  currencies) = neutral — UNLESS a clear global risk event that hits all
+  emerging markets. A surprise Fed/ECB hike ANNOUNCEMENT = negative; hike
+  previews ("bekleniyor") and currency-reaction stories = neutral.
+- Rate-HIKE expectations (TCMB or Fed) = negative (easing deferred);
+  rate-CUT expectations = positive.
+- Rising FX deposits / dollarization = negative for TL sentiment.
+- Ministerial PR, ribbon-cuttings, and speeches without new policy = neutral.
+- Intra-party political turmoil (congress calls, internal resignations) =
+  neutral; arrests or probes of major political figures (mayors, opposition
+  leaders) = negative.
+- Foreign investment interest in Turkey = positive.
+- Company-level news counts: bankruptcies/fines/disclosed problems = negative;
+  records/major contracts = positive — regardless of company size.
+- Genuinely ambiguous after brief consideration = neutral.
 
 For each headline also give a "strength" between 0.1 and 1.0 expressing how strong
 and unambiguous the sentiment is (use 0.0 for neutral): a dramatic crisis headline
@@ -189,7 +216,10 @@ class LLMSentimentScorer:
 
     def __init__(self, model: str = LLM_SENTIMENT_MODEL,
                  batch_size: int = LLM_SENTIMENT_BATCH_SIZE):
-        self.model_name = model
+        self.model = model            # what we send to the API — never mutated
+        self.model_name = model       # provenance string stored in the DB;
+                                      # locked to "<api-snapshot>/<prompt-ver>"
+                                      # after the first successful response
         self.batch_size = batch_size
         self._system_prompt = _build_system_prompt()
         self._api_key: Optional[str] = None
@@ -209,7 +239,7 @@ class LLMSentimentScorer:
     def _request(self, listing: str, system_prompt: Optional[str] = None,
                  schema: Optional[dict] = None, schema_name: str = "sentiment_labels") -> dict:
         payload = {
-            "model": self.model_name,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt or self._system_prompt},
                 {"role": "user", "content": listing},
@@ -221,7 +251,7 @@ class LLMSentimentScorer:
             },
             "max_completion_tokens": 8000,
         }
-        if self.model_name.startswith("gpt-5"):
+        if self.model.startswith("gpt-5"):
             payload["reasoning_effort"] = "low"
 
         last_err = None
