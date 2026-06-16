@@ -1,0 +1,63 @@
+name: daily-pipeline
+
+# Daily BIST sentiment run in the cloud. State (the SQLite DB) lives on an
+# orphan `data` branch: each run restores it, runs the pipeline, and force-
+# pushes the updated DB back as a single snapshot (no history bloat).
+#
+# SINGLE WRITER: once this is confirmed working, disable the local Windows
+# Task Scheduler job — otherwise the laptop and the cloud both mutate the DB
+# and diverge.
+
+on:
+  schedule:
+    - cron: "30 6 * * 1-5"     # 06:30 UTC ≈ 09:30 Istanbul, Mon–Fri (pre-open)
+  workflow_dispatch: {}         # manual "Run workflow" button for testing
+
+permissions:
+  contents: write               # default GITHUB_TOKEN may push the data branch
+
+concurrency:
+  group: daily-pipeline         # never two runs writing the DB at once
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo (main)
+        uses: actions/checkout@v4
+
+      - name: Restore DB from data branch
+        run: |
+          if git fetch origin data 2>/dev/null; then
+            git checkout origin/data -- finance_sentiment.db \
+              && echo "Restored DB from data branch." \
+              || echo "data branch has no DB file yet — starting fresh."
+          else
+            echo "data branch does not exist yet — starting fresh."
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install slim deps (no torch — LLM backend)
+        run: pip install -r requirements-cloud.txt
+
+      - name: Run pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SENTIMENT_BACKEND: llm
+        run: python main.py run --no-show
+
+      - name: Persist DB + chart to data branch
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-snapshot
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          git add -f finance_sentiment.db sentiment_vs_bist100.png
+          git commit -m "data snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f origin data-snapshot:data
