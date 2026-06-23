@@ -232,24 +232,40 @@ def cmd_export_labels(args: argparse.Namespace) -> None:
         print(f"  [dedup] Dropped {before - after} near-duplicate titles "
               f"before sampling ({after} unique remain).")
 
-    # Stratified sample: equal representation of pos / neu / neg
-    n_per_label = max(1, args.n // 3)
-    frames = []
-    for label in ["positive", "neutral", "negative"]:
-        subset = df[df["model_label"] == label]
-        n_take = min(n_per_label, len(subset))
-        if n_take:
-            frames.append(subset.head(n_take))
-        else:
-            print(f"  [!]  No '{label}' headlines available to sample.")
+    if getattr(args, "uncertain", False):
+        # Active learning: label the headlines the model is LEAST sure about —
+        # the ones nearest a decision boundary — instead of a random sample.
+        # These change outcomes and surface rubric blind spots fastest.
+        #   sentiment boundary: directional calls with small |score| (just over
+        #     the +-0.05 threshold) are the shakiest; |score| near 0.05 = unsure.
+        #   relevance boundary: grade near the 0.25 aggregation cutoff = unsure.
+        s = df["model_score"].abs()
+        sent_unc = (0.25 - (s - 0.05).abs().clip(upper=0.25)).where(s > 0, 0.0)
+        rel_unc  = 0.25 - (df["model_relevance"] - 0.25).abs().clip(upper=0.25)
+        df = df.assign(_uncert=pd.concat([sent_unc, rel_unc], axis=1).max(axis=1))
+        sample = df.sort_values("_uncert", ascending=False).head(args.n).copy()
+        sample = sample.drop(columns=["_uncert"]).sample(frac=1, random_state=42).reset_index(drop=True)
+        print(f"  [uncertain] Selected the {len(sample)} headlines nearest a "
+              f"decision boundary (active learning).")
+    else:
+        # Stratified sample: equal representation of pos / neu / neg
+        n_per_label = max(1, args.n // 3)
+        frames = []
+        for label in ["positive", "neutral", "negative"]:
+            subset = df[df["model_label"] == label]
+            n_take = min(n_per_label, len(subset))
+            if n_take:
+                frames.append(subset.head(n_take))
+            else:
+                print(f"  [!]  No '{label}' headlines available to sample.")
 
-    if not frames:
-        print("  No scored headlines in the expected label classes.")
-        return
+        if not frames:
+            print("  No scored headlines in the expected label classes.")
+            return
 
-    sample = pd.concat(frames, ignore_index=True)
-    # Shuffle so the annotator sees labels interleaved, not in groups
-    sample = sample.sample(frac=1, random_state=42).reset_index(drop=True)
+        sample = pd.concat(frames, ignore_index=True)
+        # Shuffle so the annotator sees labels interleaved, not in groups
+        sample = sample.sample(frac=1, random_state=42).reset_index(drop=True)
     sample["human_label"] = ""
     # Validate the LLM's relevance grade alongside sentiment: mark y/n whether
     # the headline belongs in a Turkish-market sentiment index at all.
@@ -448,6 +464,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exclude",
         default=None,
         help="CSV of already-labeled headlines whose ids should be skipped",
+    )
+    export_p.add_argument(
+        "--uncertain",
+        action="store_true",
+        help="Active learning: sample headlines nearest a decision boundary "
+             "instead of a stratified random sample (most informative to label)",
     )
 
     val_p = sub.add_parser(

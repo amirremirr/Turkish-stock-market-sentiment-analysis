@@ -3,6 +3,10 @@ finance_sentiment.db
 *.png
 !docs/*.png
 labels_to_validate*.csv
+labels_validated*.csv
+disagreements*.csv
+consistency*.csv
+uncertain_batch.csv
 benchmark_llm_results.csv
 *.xlsx
 

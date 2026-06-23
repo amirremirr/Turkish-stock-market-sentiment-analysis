@@ -8,7 +8,7 @@ Run:  C:\\fin\\Scripts\\pytest tests/ -v
 
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -689,12 +689,13 @@ class TestVisualize:
 
     def test_saves_png_with_sufficient_data(self, tmp_db, tmp_path):
         """With 5+ overlapping days the plot should render and save."""
+        # Dates relative to today so they never age out of the lookback window.
+        _base = date.today() - timedelta(days=8)
         days = [
-            ("2026-05-20", 14000.0, 0.50),
-            ("2026-05-21", 13900.0, -0.71),
-            ("2026-05-22", 14100.0, 0.72),
-            ("2026-05-23", 14050.0, -0.35),
-            ("2026-05-24", 14200.0, 0.71),
+            ((_base + timedelta(days=i)).isoformat(), price, score)
+            for i, (price, score) in enumerate(
+                [(14000.0, 0.50), (13900.0, -0.71), (14100.0, 0.72),
+                 (14050.0, -0.35), (14200.0, 0.71)])
         ]
         prices = pd.DataFrame({
             "date":         [d[0] for d in days],
@@ -728,13 +729,14 @@ class TestVisualize:
         5–29 overlapping days: plot renders (not None) but is in PRELIMINARY mode.
         The function should still save the PNG -- callers inspect the log for warnings.
         """
-        # 5 days: above the hard floor (5) but below MINIMUM_OVERLAP_DAYS (30)
+        # 5 days: above the hard floor (5) but below MINIMUM_OVERLAP_DAYS (30).
+        # Dates relative to today so they never age out of the lookback window.
+        _base = date.today() - timedelta(days=8)
         days = [
-            ("2026-05-20", 14000.0, 0.50),
-            ("2026-05-21", 13900.0, -0.71),
-            ("2026-05-22", 14100.0, 0.72),
-            ("2026-05-23", 14050.0, -0.35),
-            ("2026-05-24", 14200.0, 0.71),
+            ((_base + timedelta(days=i)).isoformat(), price, score)
+            for i, (price, score) in enumerate(
+                [(14000.0, 0.50), (13900.0, -0.71), (14100.0, 0.72),
+                 (14050.0, -0.35), (14200.0, 0.71)])
         ]
         prices = pd.DataFrame({
             "date":         [d[0] for d in days],

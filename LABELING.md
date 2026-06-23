@@ -104,6 +104,36 @@ it won't be used for the market index, but it validates the model's grading).
   earlier rows — drift between row 1 and row 300 is worse than any single
   wrong label.
 
+## Label-quality tools (methodological audit)
+
+Beyond "does the model agree with me," three tools check whether the ground
+truth *itself* is trustworthy — run them when you want to improve the labeling
+systematically rather than just collect more of it.
+
+**1. Adjudicate disagreements** — recover the true error rate. Some "model
+errors" are the model being right and you having drifted; tagging them tells
+you real accuracy and surfaces rubric gaps.
+```powershell
+python label_audit.py disagreements labels_validated_p3.csv   # -> disagreements_to_review.csv
+# fill the 'verdict' column: model | human | ambiguous, then:
+python label_audit.py disagreements disagreements_to_review.csv --summary
+```
+
+**2. Measure your own consistency** (the ceiling the scorer is graded against).
+Re-label a blind subset after a ~2-week gap; if you only agree with your past
+self 85% of the time, an 83% scorer is essentially maxed out.
+```powershell
+python label_audit.py consistency-export labels_validated.csv --n 50  # -> consistency_relabel.csv
+# re-label it blind (don't peek at the original), then:
+python label_audit.py consistency-check labels_validated.csv consistency_relabel.csv
+```
+
+**3. Label what's informative, not what's random** — active learning. Pulls the
+headlines nearest a decision boundary instead of a stratified random sample.
+```powershell
+python main.py export-labels --n 100 --uncertain --exclude labels_validated.csv
+```
+
 ## When you're done
 
 ```powershell
