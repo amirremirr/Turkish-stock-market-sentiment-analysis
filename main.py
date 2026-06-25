@@ -152,6 +152,12 @@ def cmd_fx_rates(args: argparse.Namespace) -> None:
         print("  No FX data retrieved (check ALPHA_VANTAGE_KEY or rate limit).")
 
 
+def cmd_fetch_factors(args: argparse.Namespace) -> None:
+    db.init_db(args.db)
+    n = p.factors_step(lookback_days=args.days, db_path=args.db)
+    print(f"  {n} market-factor rows stored (EM index + oil).")
+
+
 def cmd_clean(args: argparse.Namespace) -> None:
     db.init_db(args.db)
     if args.dry_run:
@@ -427,6 +433,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Recompute sentiment labels from stored probabilities with current thresholds")
     sub.add_parser("prices",       parents=[shared], help="Download BIST 100 price history")
     sub.add_parser("fx-rates",     parents=[shared], help="Download USD/TRY FX rates (Alpha Vantage)")
+    sub.add_parser("fetch-factors", parents=[shared],
+                   help="Download EM index + oil context series (Yahoo Finance)")
     sub.add_parser("plot",         parents=[shared], help="Generate the visualisation")
     sub.add_parser("status",       parents=[shared], help="Show database statistics")
     sub.add_parser("dashboard",    parents=[shared],
@@ -506,6 +514,7 @@ _COMMANDS = {
     "relabel":          cmd_relabel,
     "prices":           cmd_prices,
     "fx-rates":         cmd_fx_rates,
+    "fetch-factors":    cmd_fetch_factors,
     "plot":             cmd_plot,
     "status":           cmd_status,
     "dashboard":        cmd_dashboard,

@@ -20,6 +20,14 @@ DB_PATH = "finance_sentiment.db"
 # -- Market data --------------------------------------------------------------
 BIST100_TICKER = "XU100.IS"          # Yahoo Finance ticker for BIST 100 index
 
+# Broad market factors collected daily (Yahoo Finance) to contextualize/control
+# BIST moves — so a future "signal" can be tested NET of global drift, not just
+# "all of EM rose". symbol -> human label.
+FACTOR_TICKERS = {
+    "EEM":  "emerging_markets",   # iShares MSCI Emerging Markets ETF
+    "BZ=F": "brent_oil",          # Brent crude — Turkey imports nearly all its energy
+}
+
 # -- Alpha Vantage (second data source) ---------------------------------------
 # Free tier: 25 requests/day, 5 requests/minute.
 # Used for: USD/TRY daily FX rates (BIST 100 index is not available on AV).

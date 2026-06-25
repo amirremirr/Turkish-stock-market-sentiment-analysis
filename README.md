@@ -77,6 +77,18 @@ If there's one thing to take away: the interesting part of this project isn't th
 
 ---
 
+## What the news itself looks like
+
+The predictive question needs more data, but the ~1,300-headline corpus already tells a story *now* — pure description, no overfitting risk (`analyze_corpus.py`):
+
+![corpus overview](docs/corpus_overview.png)
+
+- **Currency/lira news skews most bearish** (average −0.19) while Turkish-economy news skews most bullish (+0.14) — consistent with a chronically depreciating lira and upbeat official macro framing.
+- **Outlets differ systematically, not randomly.** Pro-government *Sabah* is both the most on-topic and the most bullish; opposition *Sözcü* is the most bearish — a measurable media-slant effect.
+- An **emerging-markets index and oil price** are now collected daily alongside BIST, so any eventual signal can be tested *net of* global moves — rather than crediting "all of EM rose today" to Turkish news.
+
+---
+
 ## Run it
 
 ```bash

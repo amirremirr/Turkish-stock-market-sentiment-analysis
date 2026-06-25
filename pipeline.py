@@ -522,6 +522,40 @@ def fx_rates_step(
 
 
 # -----------------------------------------------------------------------------
+# Step 4c - Market factors (EM index, oil) — context/control series
+# -----------------------------------------------------------------------------
+
+def factors_step(lookback_days: int = DEFAULT_LOOKBACK_DAYS, db_path: str = DB_PATH) -> int:
+    """Fetch broad market factors (EM, oil) via yfinance. Non-fatal on failure."""
+    from config import FACTOR_TICKERS
+    logger.info("=== STEP 4c: Market factors %s ===", list(FACTOR_TICKERS))
+    start = (date.today() - timedelta(days=lookback_days + 5)).isoformat()
+    total = 0
+    for symbol, label in FACTOR_TICKERS.items():
+        try:
+            raw = yf.download(symbol, start=start, progress=False, auto_adjust=True)
+        except Exception as exc:
+            logger.warning("factors: %s download failed: %s", symbol, exc)
+            continue
+        if raw.empty:
+            logger.warning("factors: %s returned no data", symbol)
+            continue
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+        raw = raw.sort_index()
+        ret = raw["Close"].pct_change().mul(100)
+        rows = [
+            {"date": idx.strftime("%Y-%m-%d"), "symbol": symbol, "label": label,
+             "close": float(close), "daily_return": (None if pd.isna(r) else float(r))}
+            for idx, close, r in zip(raw.index, raw["Close"].values, ret.values)
+            if not pd.isna(close)
+        ]
+        total += db.upsert_market_factors(rows, db_path=db_path)
+    logger.info("Market factors: %d rows across %d symbols", total, len(FACTOR_TICKERS))
+    return total
+
+
+# -----------------------------------------------------------------------------
 # Step 4d - Clean off-topic headlines
 # -----------------------------------------------------------------------------
 
@@ -611,6 +645,13 @@ def run_all(
             print(f"  [OK] FX rates  - {n} USD/TRY days stored")
         else:
             print("  [ ] FX rates  - skipped or rate-limited")
+
+        try:
+            nf = factors_step(lookback_days=lookback_days, db_path=db_path)
+            print(f"  [OK] Factors   - {nf} EM/oil rows stored")
+        except Exception as exc:   # never let the context series break the run
+            logger.warning("factors step failed (non-fatal): %s", exc)
+            print("  [ ] Factors    - skipped (fetch error)")
 
         if not skip_plot:
             path = plot_step(

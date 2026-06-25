@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS usdtry_rates (
     close  REAL
 );
 
+-- Broad market factors (EM index, oil) for controlling BIST moves: lets us
+-- later test BIST returns NET of global/EM moves (abnormal return) so a
+-- "signal" is not just "all of emerging markets went up that day".
+CREATE TABLE IF NOT EXISTS market_factors (
+    date         TEXT NOT NULL,
+    symbol       TEXT NOT NULL,
+    label        TEXT,
+    close        REAL,
+    daily_return REAL,
+    PRIMARY KEY (date, symbol)
+);
+
 -- Experiment registry: one row per named research configuration; walk-forward
 -- results are appended into metrics_json (migration Phase 0)
 CREATE TABLE IF NOT EXISTS experiments (
@@ -653,6 +665,34 @@ def upsert_fx_rates(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> i
         )
     logger.info("Upserted %d USD/TRY FX rows", len(data))
     return len(data)
+
+
+def upsert_market_factors(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> int:
+    """Upsert market-factor rows. Each dict: date, symbol, label, close, daily_return."""
+    data = [(r["date"], r["symbol"], r.get("label"), r.get("close"), r.get("daily_return"))
+            for r in rows]
+    with _conn(db_path) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO market_factors
+               (date, symbol, label, close, daily_return) VALUES (?, ?, ?, ?, ?)""",
+            data,
+        )
+    logger.info("Upserted %d market-factor rows", len(data))
+    return len(data)
+
+
+def get_market_factors(symbol: Optional[str] = None, start: Optional[str] = None,
+                       db_path: str = DB_PATH) -> pd.DataFrame:
+    """Return market factors, optionally for one symbol / from a start date."""
+    where, params = [], []
+    if symbol:
+        where.append("symbol = ?"); params.append(symbol)
+    if start:
+        where.append("date >= ?"); params.append(start)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with _conn(db_path) as con:
+        return pd.read_sql_query(
+            f"SELECT * FROM market_factors {clause} ORDER BY date", con, params=params)
 
 
 def get_fx_rates(
