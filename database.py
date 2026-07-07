@@ -163,6 +163,15 @@ CREATE TABLE IF NOT EXISTS kv_state (
     value TEXT
 );
 
+-- External "zoom-out" series: Google Trends search interest, GDELT global media
+-- tone, etc. Generic (date, series, value) so new sources drop straight in.
+CREATE TABLE IF NOT EXISTS external_series (
+    date   TEXT NOT NULL,
+    series TEXT NOT NULL,
+    value  REAL,
+    PRIMARY KEY (date, series)
+);
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -665,6 +674,25 @@ def upsert_fx_rates(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> i
         )
     logger.info("Upserted %d USD/TRY FX rows", len(data))
     return len(data)
+
+
+def upsert_external_series(rows: Iterable[Tuple], db_path: str = DB_PATH) -> int:
+    """Upsert (date, series, value) rows into external_series."""
+    data = list(rows)
+    with _conn(db_path) as con:
+        con.executemany(
+            "INSERT OR REPLACE INTO external_series (date, series, value) VALUES (?, ?, ?)", data)
+    logger.info("Upserted %d external-series rows", len(data))
+    return len(data)
+
+
+def get_external_series(db_path: str = DB_PATH) -> pd.DataFrame:
+    """Return external_series wide (one column per series, indexed by date)."""
+    with _conn(db_path) as con:
+        long = pd.read_sql_query("SELECT date, series, value FROM external_series", con)
+    if long.empty:
+        return long
+    return long.pivot(index="date", columns="series", values="value").reset_index()
 
 
 def upsert_market_factors(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> int:

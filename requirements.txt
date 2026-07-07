@@ -12,5 +12,6 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 scipy>=1.11.0
 statsmodels>=0.14.0
+pytrends>=4.9.0            # Google Trends (exploratory zoom-out data; not in cloud loop)
 tqdm>=4.65.0
 pytest>=7.0.0
