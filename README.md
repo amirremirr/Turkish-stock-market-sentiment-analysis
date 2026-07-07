@@ -93,7 +93,7 @@ Chasing something *non-obvious*, the strongest result came not from the market s
 
 ![media polarization](docs/polarization.png)
 
-Turkish financial-news sentiment carries a **large, highly significant political slant** — pro-government/state outlets average **+0.11**, opposition **−0.09**, a gap of **+0.20** (*p ≈ 4×10⁻²⁴*, Cohen's d = 0.74). And it's *political*, not just tonal: the divergence is concentrated in domestic-economic coverage (**+0.21** on macro) and nearly vanishes on externally-set topics (**+0.04** on energy/commodities) — outlets split on how the Turkish economy is doing but agree about oil prices. Full write-up and caveats: [docs/polarization_findings.md](docs/polarization_findings.md).
+Turkish financial-news sentiment carries a **large, highly significant political slant** — pro-government/state outlets average **+0.11**, opposition **−0.09**, a gap of **+0.20** (*p ≈ 4×10⁻²⁴*, Cohen's d = 0.74). It replicates on a second independent model (Gemini), so it's in the text, not one scorer's artifact. And it's *political*, not just tonal: the divergence is concentrated in domestic-economic coverage (**+0.21** on macro) and nearly vanishes on externally-set topics (**+0.04** on energy/commodities) — outlets split on how the Turkish economy is doing but agree about oil prices. *(How much is spin vs which stories each camp covers — a genuine open question I tested and only partly resolved — is in the write-up.)* Full detail and caveats: [docs/polarization_findings.md](docs/polarization_findings.md).
 
 ---
 
