@@ -24,8 +24,9 @@ BIST100_TICKER = "XU100.IS"          # Yahoo Finance ticker for BIST 100 index
 # BIST moves — so a future "signal" can be tested NET of global drift, not just
 # "all of EM rose". symbol -> human label.
 FACTOR_TICKERS = {
-    "EEM":  "emerging_markets",   # iShares MSCI Emerging Markets ETF
-    "BZ=F": "brent_oil",          # Brent crude — Turkey imports nearly all its energy
+    "EEM":     "emerging_markets",  # iShares MSCI Emerging Markets ETF
+    "BZ=F":    "brent_oil",         # Brent crude — Turkey imports nearly all its energy
+    "USDTRY=X":"usd_try",           # lira — the most politics-sensitive Turkish asset
 }
 
 # -- Alpha Vantage (second data source) ---------------------------------------
