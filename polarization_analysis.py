@@ -32,7 +32,10 @@ from scipy import stats
 from config import DB_PATH
 
 PRO_GOV    = ["aa_ekonomi", "aa_politika", "sabah_ekonomi"]   # state + pro-government
-OPPOSITION = ["sozcu_gundem"]                                  # opposition
+# Opposition camp broadened 2026-07-07 (was single-source). cumhuriyet_ekonomi /
+# sozcu_ekonomi start collecting from that date — re-run to check the slant holds
+# with a second distinct opposition outlet as their history accumulates.
+OPPOSITION = ["sozcu_gundem", "sozcu_ekonomi", "cumhuriyet_ekonomi"]
 MARKET     = ["bloomberght", "investing_tr_economy"]           # market-focused
 _CAT = {"fx_lira": "Currency", "turkey_macro": "Turkish economy",
         "energy_commodities": "Energy/commodities", "rates_tcmb": "Rates/TCMB",

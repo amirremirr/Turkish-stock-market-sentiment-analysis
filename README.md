@@ -85,7 +85,15 @@ The predictive question needs more data, but the ~1,300-headline corpus already 
 
 - **Currency/lira news skews most bearish** (average −0.19) while Turkish-economy news skews most bullish (+0.14) — consistent with a chronically depreciating lira and upbeat official macro framing.
 - **Outlets differ systematically, not randomly.** Pro-government *Sabah* is both the most on-topic and the most bullish; opposition *Sözcü* is the most bearish — a measurable media-slant effect.
-- An **emerging-markets index and oil price** are now collected daily alongside BIST, so any eventual signal can be tested *net of* global moves — rather than crediting "all of EM rose today" to Turkish news.
+- An **emerging-markets index, oil, and USD/TRY** are now collected daily alongside BIST, so any eventual signal can be tested *net of* global moves — rather than crediting "all of EM rose today" to Turkish news.
+
+### Headline finding — a political slant in financial sentiment
+
+Chasing something *non-obvious*, the strongest result came not from the market series (too little data) but from the news ecosystem itself, where there are thousands of observations:
+
+![media polarization](docs/polarization.png)
+
+Turkish financial-news sentiment carries a **large, highly significant political slant** — pro-government/state outlets average **+0.11**, opposition **−0.09**, a gap of **+0.20** (*p ≈ 4×10⁻²⁴*, Cohen's d = 0.74). And it's *political*, not just tonal: the divergence is concentrated in domestic-economic coverage (**+0.21** on macro) and nearly vanishes on externally-set topics (**+0.04** on energy/commodities) — outlets split on how the Turkish economy is doing but agree about oil prices. Full write-up and caveats: [docs/polarization_findings.md](docs/polarization_findings.md).
 
 ---
 

@@ -67,7 +67,11 @@ RSS_FEEDS = {
     # elections, crises) will pass the relevance gate.
     "aa_politika":          "https://www.aa.com.tr/tr/rss/default?cat=politika",
     "sozcu_gundem":         "https://www.sozcu.com.tr/rss/gundem.xml",
-    # Note: sozcu_siyaset and sozcu_ekonomi return identical content to gundem.
+    # Opposition/independent press — broadens the "opposition camp" beyond a
+    # single outlet (Sozcu) so the media-polarization finding isn't single-source
+    # (added 2026-07-07). Cumhuriyet is a distinct major opposition paper.
+    "cumhuriyet_ekonomi":   "https://www.cumhuriyet.com.tr/rss/ekonomi.xml",
+    "sozcu_ekonomi":        "https://www.sozcu.com.tr/rss/ekonomi.xml",
     #
     # REMOVED (2026-06-11): kap_bildirimler — the URL 404s; KAP's redesigned
     # site (Next.js) no longer serves RSS at any discoverable path. The feed
@@ -198,6 +202,8 @@ SOURCE_TIERS = {
     "ntv_ekonomi":          "C",
     "sabah_ekonomi":        "C",
     "sozcu_gundem":         "C",
+    "cumhuriyet_ekonomi":   "C",
+    "sozcu_ekonomi":        "C",
 }
 DEFAULT_SOURCE_TIER = "C"
 
