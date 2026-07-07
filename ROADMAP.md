@@ -49,6 +49,21 @@ event detection, GPT-written daily mood summary on the dashboard.
 
 ---
 
+## Signal exploration findings (2026-07-07, `explore_signal.py`)
+
+At ~30 overlap days (underpowered; min detectable |r| ≈ 0.5), a disciplined,
+FDR-corrected sweep of targets and aggregations found:
+- **No target shows a signal**; direction, volatility, and FX are all ~zero.
+- **The FX "p=0.05" was a false positive** — killed by FDR correction (q=0.43).
+- **Aggregation choice does not matter** — mean, confidence-weighted, intensity,
+  shock-count, net-direction all ~zero vs next return. Rules out "bad averaging"
+  as the reason for the null.
+- **One lead to watch as data grows:** abnormal return vs EM (r≈+0.26, sensible
+  sign — good news → Turkey outperforms EM). NOT significant (p=0.20), does not
+  survive correction. Re-check at 60+ days. Do not report as a finding.
+
+---
+
 ## Standing rule — aggregation weights are FROZEN (2026-06-12)
 
 The confidence floor (0.10), time-of-day multipliers (1.5×/1.0×/0.8×), and
