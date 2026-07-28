@@ -52,6 +52,19 @@ jobs:
           SENTIMENT_BACKEND: llm
         run: python main.py run --no-show
 
+      - name: Publish latest chart to README
+        run: |
+          cp sentiment_vs_bist100.png docs/sample_output.png
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/sample_output.png
+          if git diff --cached --quiet; then
+            echo "README chart is already current."
+          else
+            git commit -m "Update README chart"
+            git push origin HEAD:main
+          fi
+
       - name: Persist DB + chart to data branch
         run: |
           git config user.name  "github-actions[bot]"
