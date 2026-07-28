@@ -6,15 +6,13 @@
 ![Sentiment](https://img.shields.io/badge/sentiment-gpt--5--mini-orange.svg)
 ![Status](https://img.shields.io/badge/status-active%20research-yellow.svg)
 
-Every weekday this project reads Turkish financial news, scores each headline's market sentiment with a language model, and tracks whether that daily "mood" has any power to predict the next day's move in the **BIST 100** — Istanbul's main stock index.
+This project investigates whether sentiment extracted from Turkish financial news contains predictive information about subsequent **BIST 100** returns. It combines automated news collection, multilingual transformer models, human-validated evaluation, and time-series analysis in a reproducible research pipeline.
 
 > **Research question:** Does the sentiment of Turkish financial news on day *t* predict the direction of BIST 100 on day *t+1*?
 
-I built it as a portfolio project — somewhere to do empirical work the careful way and stay honest about what is actually known versus merely hoped. **The code is mostly AI-written (Claude Code); the research design, the methodology, the validation discipline, and the judgment calls are mine.** Where a decision was a genuine call — especially where I overruled the AI's first instinct — I've said so below. The intended reader is a fellow economics or finance student, so the *why* matters more here than the *how*.
+The implementation was developed with AI-assisted coding tools, while the research design, data collection, validation methodology, evaluation framework, and experimental decisions were designed and reviewed by me. The repository documents the reasoning behind important choices so that the work can be inspected and reproduced.
 
-> ⚠️ **Honest status (late June 2026):** ~1,200 headlines collected since March. Sentiment is scored by **gpt-5-mini at ~83% agreement with held-out human labels**; the relevance filter is validated at **~91%**. But the headline research question is **not yet answerable** — it needs 30 reliable days where news and market data overlap, and we are at **22**. This is a research instrument, not a trading signal.
->
-> And read that 83% correctly: it measures *agreement with a human reading headlines* — **not** predictive power. A model can label sentiment perfectly and still produce a useless market signal. Whether sentiment predicts returns is a separate, still-open question.
+> **Current scope (late June 2026):** The corpus contains ~1,200 headlines collected since March. gpt-5-mini reaches **~83% agreement with held-out human labels**, and the relevance filter reaches **~91%**. The predictive analysis remains preliminary: 30 reliable overlapping news-and-market days are required, and the current dataset has 22. These validation figures measure agreement with human annotations, not predictive power.
 
 ![Sentiment vs BIST 100](docs/sample_output.png)
 
@@ -30,7 +28,7 @@ The hypothesis sounds simple: positive news today → market up tomorrow. It is 
 - **Causality runs both ways.** Sentiment may *react* to prices rather than lead them. A model that scores headlines beautifully can still just be measuring yesterday's move.
 - **Daily frequency is noisy.** With one data point per trading day, any real effect is buried under everything else that moves a market.
 
-So the honest null hypothesis is **"no signal,"** and the entire project is built to test that *fairly* rather than to manufacture a yes. Most of the engineering below exists to avoid fooling myself.
+The null hypothesis is **"no signal."** The pipeline is designed to test it fairly, with safeguards against overfitting and misleading alignment.
 
 ---
 
@@ -52,9 +50,9 @@ So the honest null hypothesis is **"no signal,"** and the entire project is buil
 
 ---
 
-## Errors rigor caught (and how) — the part I'm most proud of
+## Quality checks and corrections
 
-A research result is only as trustworthy as the bugs you *didn't* ship. These are real mistakes the process surfaced before they could poison a conclusion.
+These are real mistakes the process surfaced before they could affect a conclusion.
 
 - **The signal was computed on the wrong days.** "Next-day return" was calculated *after* the data was filtered, so ~40% of the (sentiment, next-day-return) pairs were actually **2–15 days apart** — quietly corrupting every correlation. Caught in a code review; fixed by computing returns on the full, gap-free trading-day series *before* matching them to sentiment.
 - **One news source was triple-counted.** Headlines without a URL slipped past the database's duplicate check on every run (SQLite treats every `NULL` as unique), so one outlet's stories kept inflating the daily average. Caught by the de-duplication audit; fixed with content-based dedup.
@@ -67,13 +65,13 @@ The recurring theme: **backups, loud failures, held-out validation, and an audit
 
 ---
 
-## Where it stands, honestly
+## Current status
 
 - **~1,200 headlines** collected daily since March 2026; sentiment scored at **~83% held-out** agreement, relevance at **~91%**.
-- The research question — *does sentiment predict returns?* — is **not yet answerable.** It needs 30 reliable overlapping days; we're at **22** (~early July). A genuine out-of-sample answer (walk-forward testing, net of transaction costs) wants ~60 days — roughly mid-August.
-- **The most likely outcome is a null result,** and that's fine: "Turkish daily news sentiment does not predict next-day BIST returns" is a real, honest finding. The failure mode to avoid is tuning the knobs until a fake signal appears.
+- The research question needs 30 reliable overlapping days; the current analysis has **22** (~early July). A genuine out-of-sample answer (walk-forward testing, net of transaction costs) requires ~60 days — roughly mid-August.
+- A null result would still be informative: Turkish daily news sentiment may not predict next-day BIST returns. The evaluation is designed to avoid tuning parameters until a spurious signal appears.
 
-If there's one thing to take away: the interesting part of this project isn't the model — it's the discipline of *not* declaring victory early.
+The central contribution is the evaluation discipline around the model: validation, alignment, and safeguards against premature conclusions.
 
 ---
 
@@ -130,21 +128,18 @@ Quality audit: `python evaluate.py` runs a read-only 6-layer report (L0 system h
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    A[Turkish financial news] --> B[RSS scraper]
+    B --> C[(SQLite database)]
+    C --> D[Sentiment model]
+    D --> E[Daily aggregation]
+    E --> F[Market-session alignment]
+    G[BIST 100 market data] --> F
+    F --> H[Evaluation and reporting]
 ```
-RSS feeds  →  relevance filter  →  LLM analysis (sentiment + category + relevance 0–1)
-                                                  │
-                                                  ▼
-                         confidence + time-of-day + relevance weighting
-                                                  │
-                                   signal_date alignment (news → tradable session)
-                                                  │
-                                      ┌───────────┴───────────┐
-                                      ▼                       ▼
-                                 SQLite DB              BIST 100 prices (yfinance)
-                                      └───────────┬───────────┘
-                                                  ▼
-                                3-panel chart · HTML dashboard · 6-layer audit
-```
+
+The pipeline preserves raw headlines and intermediate metadata, making scores, weights, market-session assignment, and evaluation outputs auditable.
 
 ```
 config.py          Every tunable parameter (feeds, keywords, thresholds, weights)
@@ -171,6 +166,16 @@ CLOUD.md        the cloud setup          DOCUMENTATION.md  full technical refere
 
 ---
 
+## Future Work
+
+- Expand annotation with multiple independent human annotators and formal inter-annotator agreement.
+- Move from headline-level scores to event-level sentiment, reducing duplicate coverage of the same news event.
+- Fine-tune and benchmark a Turkish finance-specific sentiment model.
+- Use time-aware validation and walk-forward evaluation as the market-history sample grows.
+- Compare the current aggregate signal with predictive models, including transformer-based approaches, while accounting for transaction costs and global-market controls.
+
+---
+
 ## License
 
-MIT — see [LICENSE](LICENSE). Built with AI-assisted coding; the research design and methodology are my own.
+MIT — see [LICENSE](LICENSE).
