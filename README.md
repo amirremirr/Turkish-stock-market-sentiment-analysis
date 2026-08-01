@@ -118,13 +118,14 @@ In the July analysis snapshot, pro-government/state outlets average **+0.11** an
 git clone https://github.com/amirremirr/Turkish-stock-market-sentiment-analysis.git
 cd Turkish-stock-market-sentiment-analysis
 
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-cloud.txt
 python -m scripts.demo --output-dir demo_output
 ```
 
 That path is fully offline after dependency installation. For a live pipeline run,
 copy `.env.example` to `.env`, supply the required provider credentials, and then
-run `run.bat run`. Set `SENTIMENT_BACKEND="xlmr"` for the offline scoring fallback.
+run `run.bat run`. The optional local XLM-R scoring fallback requires the larger
+`requirements.txt` environment and `SENTIMENT_BACKEND="xlmr"`.
 The pipeline also runs unattended every weekday in GitHub Actions;
 `pull-cloud-db.bat` retrieves the latest data-branch snapshot.
 
