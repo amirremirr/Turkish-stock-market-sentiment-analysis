@@ -2,10 +2,14 @@
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 import database as db
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -13,6 +17,16 @@ def integrity_db(tmp_path):
     path = str(tmp_path / "integrity.db")
     db.init_db(path)
     return path
+
+
+@pytest.fixture
+def production_legacy_db(tmp_path):
+    path = tmp_path / "production-legacy.db"
+    with sqlite3.connect(path) as con:
+        con.executescript(
+            (FIXTURES / "production_legacy.sql").read_text(encoding="utf-8")
+        )
+    return str(path)
 
 
 def _headline_rows(path, columns="*"):
@@ -97,6 +111,87 @@ def test_legacy_backfill_classifies_rows_once_without_rewriting_scores(tmp_path)
         )
     db.init_db(path)
     assert _headline_rows(path, "processing_status")[2][0] == "failed"
+
+
+def test_production_legacy_migration_is_additive_idempotent_and_nonregenerating(
+    production_legacy_db,
+):
+    historical_tables = (
+        "headlines",
+        "bist100_prices",
+        "daily_sentiment",
+        "category_daily_sentiment",
+        "daily_sentiment_by_signal",
+        "usdtry_rates",
+        "market_factors",
+        "experiments",
+        "events",
+        "event_entities",
+        "kv_state",
+        "external_series",
+        "pipeline_runs",
+    )
+    derived_tables = (
+        "daily_sentiment",
+        "category_daily_sentiment",
+        "daily_sentiment_by_signal",
+    )
+    score_columns = (
+        "id, sentiment_score, sentiment_label, p_positive, p_neutral, "
+        "p_negative, model_name, scored_at"
+    )
+
+    with sqlite3.connect(production_legacy_db) as con:
+        row_counts_before = {
+            table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in historical_tables
+        }
+        scores_before = con.execute(
+            f"SELECT {score_columns} FROM headlines ORDER BY id"
+        ).fetchall()
+        derived_before = {
+            table: con.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+            for table in derived_tables
+        }
+
+    db.init_db(production_legacy_db)
+    db.init_db(production_legacy_db)
+
+    with sqlite3.connect(production_legacy_db) as con:
+        row_counts_after = {
+            table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in historical_tables
+        }
+        scores_after = con.execute(
+            f"SELECT {score_columns} FROM headlines ORDER BY id"
+        ).fetchall()
+        derived_after = {
+            table: con.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+            for table in derived_tables
+        }
+        newly_created_counts = {
+            table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in (
+                "daily_signal_variants",
+                "category_sentiment_by_signal",
+                "raw_headline_observations",
+                "headline_exclusions",
+            )
+        }
+        statuses = con.execute(
+            "SELECT processing_status FROM headlines ORDER BY id"
+        ).fetchall()
+
+    assert row_counts_after == row_counts_before
+    assert scores_after == scores_before
+    assert derived_after == derived_before
+    assert newly_created_counts == {
+        "daily_signal_variants": 0,
+        "category_sentiment_by_signal": 0,
+        "raw_headline_observations": 0,
+        "headline_exclusions": 0,
+    }
+    assert [row[0] for row in statuses] == ["scored", "scored", "pending"]
 
 
 def test_schema_and_foreign_keys_are_additive_and_idempotent(integrity_db):
