@@ -2,8 +2,8 @@
 Benchmark an LLM (OpenAI or Gemini) against the human-labeled headline set.
 
 Scores the same headlines that humans labeled, then reports:
-  - LLM accuracy vs human labels (the number that matters)
-  - XLM-RoBERTa accuracy vs human labels (current baseline, same rows)
+  - LLM categorical agreement with the project human-label rubric
+  - XLM-RoBERTa agreement with the same rubric (same rows)
   - Confusion matrix + per-category breakdown
   - Sample disagreements for manual review
 
@@ -263,9 +263,9 @@ def main() -> None:
     print("=" * 58)
     print(f"  {model_used} prompt {PROMPT_VERSION}"
           + (f"  ({args.fewshot}-shot)" if args.fewshot else "  (zero-shot)"))
-    print(f"      accuracy vs human labels:   {llm_acc:.1%}   (n={len(df)})")
+    print(f"      agreement with human-label rubric: {llm_acc:.1%}   (n={len(df)})")
     print(f"  Baseline: CSV model_label (scorer that produced the export)")
-    print(f"      accuracy vs human labels:   {csv_baseline:.1%}")
+    print(f"      agreement with human-label rubric: {csv_baseline:.1%}")
     print(f"  Majority-class baseline (always '{df['human_label'].mode()[0]}'): {majority:.1%}")
     print(f"  Delta vs CSV baseline: {llm_acc - csv_baseline:+.1%}")
     print("=" * 58)
@@ -279,9 +279,9 @@ def main() -> None:
         counts = [int((row["llm_label"] == p).sum()) for p in order]
         print(f"  {truth:>10} " + "".join(f"{c:>10}" for c in counts))
 
-    # -- Per-category accuracy ----------------------------------------------------------
+    # -- Per-category rubric agreement -------------------------------------------------
     if "category" in df.columns:
-        print(f"\n  Per-category accuracy (new prompt vs CSV baseline):")
+        print(f"\n  Per-category rubric agreement (new prompt vs CSV baseline):")
         for cat, grp in sorted(df.groupby("category"), key=lambda kv: len(kv[1]), reverse=True):
             g = (grp["llm_label"]   == grp["human_label"]).mean()
             b = (grp["model_label"] == grp["human_label"]).mean()

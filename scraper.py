@@ -15,6 +15,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,6 +24,7 @@ from config import (
     CRAWL_DELAY,
     DEFAULT_LOOKBACK_DAYS,
     HTML_SOURCES,
+    KEYWORD_RELEVANCE_RULE_VERSION,
     NEWS_CATEGORIES,
     RELEVANCE_BLOCKLIST,
     RELEVANCE_FILTER_ENABLED,
@@ -110,28 +112,83 @@ def _is_relevant(title: str) -> bool:
               Applied BEFORE the strong-marker bypass.
 
     Tier 1 - Soft blocklist: if a blocklist term is found AND no strong Turkey
-              marker is present, drop the headline.
+              marker is present, exclude the headline from derived analysis.
               Catches Bitcoin/crypto, NYSE, Nikkei, Indian rupee, etc.
 
     Tier 2 - Keyword match: at least one keyword from RELEVANCE_KEYWORDS
               must be present.
 
-    Returns True (keep) or False (drop).
+    Returns True (include) or False (exclude). Collection preserves both.
+    """
+    return _relevance_exclusion_rule(title) is None
+
+
+def _relevance_exclusion_rule(title: str) -> Optional[str]:
+    """Return the keyword rule that excludes ``title``, or ``None``.
+
+    Keeping the rule decision separate from :func:`_is_relevant` lets the
+    collector preserve off-topic observations while retaining the legacy
+    boolean predicate for existing callers.
     """
     t = _normalise(title)
 
-    # Tier 0 — always drop, no exceptions
+    # Tier 0 — always exclude, no exceptions.
     if any(hbl in t for hbl in RELEVANCE_HARD_BLOCKLIST):
-        return False
+        return "hard_blocklist"
 
     has_strong = any(s in t for s in RELEVANCE_STRONG)
 
-    # Tier 1
+    # Tier 1 — a strong Turkey-market marker overrides the soft blocklist.
     if not has_strong and any(bl in t for bl in RELEVANCE_BLOCKLIST):
-        return False
+        return "soft_blocklist"
 
-    # Tier 2
-    return any(kw in t for kw in RELEVANCE_KEYWORDS)
+    # Tier 2 — observations with no market keyword remain auditable.
+    if not any(kw in t for kw in RELEVANCE_KEYWORDS):
+        return "missing_relevance_keyword"
+
+    return None
+
+
+def _with_exclusion_metadata(headline: Dict) -> Dict:
+    """Return an observation with explicit, reversible exclusion metadata.
+
+    ``excluded_at`` belongs to the persistence layer: collection identifies
+    the rule outcome, while the database records when it was stored.
+    """
+    observation = dict(headline)
+    rule = (
+        _relevance_exclusion_rule(str(observation.get("title", "")))
+        if RELEVANCE_FILTER_ENABLED else None
+    )
+    observation.update({
+        "is_excluded": rule is not None,
+        "exclusion_reason": "off_topic" if rule is not None else None,
+        "exclusion_rule": rule,
+        "exclusion_version": (
+            KEYWORD_RELEVANCE_RULE_VERSION if rule is not None else None
+        ),
+    })
+    return observation
+
+
+def _observation_identity(headline: Dict) -> tuple:
+    """Return a stable, source-scoped identity for in-run deduplication.
+
+    URLs are preferred. URL-less observations fall back to normalised title and
+    publication date. Including the source ensures identical headlines from
+    different outlets remain distinct raw observations.
+    """
+    source = str(headline.get("source") or "unknown")
+    url = str(headline.get("url") or "").strip()
+    if url:
+        return source, "url", url
+    published = headline.get("published_at")
+    return (
+        source,
+        "title_date",
+        _normalise(str(headline.get("title", "")))[:120],
+        str(published),
+    )
 
 
 # -- HTTP session factory ------------------------------------------------------
@@ -181,68 +238,60 @@ _UTC_LITERAL_FORMATS = {
 # Formats with no time component — hour is undefined
 _DATE_ONLY_FORMATS = {"%Y-%m-%d", "%d.%m.%Y"}
 
-# Turkey is UTC+3 year-round (DST abolished Oct 2016)
-_ISTANBUL_UTC_OFFSET = 3
+# Turkey is UTC+3 year-round, but an IANA zone keeps the conversion contract
+# explicit and ensures the publication date and hour cross midnight together.
+_ISTANBUL = ZoneInfo("Europe/Istanbul")
+
+
+def _parse_datetime(raw: str) -> tuple[Optional[datetime], bool]:
+    """Return an Istanbul-local datetime and whether a time was supplied."""
+    if not raw:
+        return None, False
+    raw = raw.strip()
+
+    def _try(value: str):
+        for fmt in _DATE_FORMATS:
+            try:
+                parsed = datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+            has_time = fmt not in _DATE_ONLY_FORMATS
+            if not has_time:
+                return parsed.replace(tzinfo=_ISTANBUL), False
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(_ISTANBUL), True
+            if fmt in _UTC_LITERAL_FORMATS:
+                return parsed.replace(tzinfo=timezone.utc).astimezone(_ISTANBUL), True
+            return parsed.replace(tzinfo=_ISTANBUL), True
+        return None
+
+    parsed = _try(raw)
+    if parsed is not None:
+        return parsed
+    cleaned = re.sub(r"\s+[A-Z]{2,5}$", "", raw).strip()
+    if cleaned != raw:
+        parsed = _try(cleaned)
+        if parsed is not None:
+            return parsed
+    logger.debug("Could not parse date: %r", raw)
+    return None, False
 
 
 def _parse_date(raw: str) -> Optional[date]:
-    if not raw:
-        return None
-    raw = raw.strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(raw, fmt).date()
-        except ValueError:
-            continue
-    # try stripping timezone suffix and retrying
-    cleaned = re.sub(r"\s+[A-Z]{2,5}$", "", raw).strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
-    logger.debug("Could not parse date: %r", raw)
-    return None
+    parsed, _ = _parse_datetime(raw)
+    return parsed.date() if parsed is not None else None
 
 
 def _parse_hour(raw: str) -> Optional[int]:
-    """
-    Extract the Istanbul local hour (0-23) from a pubDate string.
-    Returns None when the string has no time component (date-only formats).
+    """Return the Istanbul-local hour, or ``None`` for date-only input."""
+    parsed, has_time = _parse_datetime(raw)
+    return parsed.hour if parsed is not None and has_time else None
 
-    Turkey is UTC+3 year-round (no DST since Oct 2016), so:
-      - Timezone-aware strings: convert to UTC, then +3
-      - Strings that are implicitly UTC (GMT / +0000 / Z literals): +3
-      - Strings with no timezone (naive): assume already in Istanbul local time
-    """
-    if not raw:
-        return None
-    raw = raw.strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            dt = datetime.strptime(raw, fmt)
-            if fmt in _DATE_ONLY_FORMATS:
-                return None
-            if dt.tzinfo is not None:
-                utc_hour = dt.astimezone(timezone.utc).hour
-                return (utc_hour + _ISTANBUL_UTC_OFFSET) % 24
-            if fmt in _UTC_LITERAL_FORMATS:
-                return (dt.hour + _ISTANBUL_UTC_OFFSET) % 24
-            return dt.hour  # naive — assume Istanbul local time
-        except ValueError:
-            continue
-    cleaned = re.sub(r"\s+[A-Z]{2,5}$", "", raw).strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            dt = datetime.strptime(cleaned, fmt)
-            if fmt in _DATE_ONLY_FORMATS:
-                return None
-            if dt.tzinfo is not None:
-                return (dt.astimezone(timezone.utc).hour + _ISTANBUL_UTC_OFFSET) % 24
-            return dt.hour
-        except ValueError:
-            continue
-    return None
+
+def _parse_timestamp(raw: str) -> Optional[str]:
+    """Return an Istanbul ISO timestamp, or ``None`` for date-only input."""
+    parsed, has_time = _parse_datetime(raw)
+    return parsed.isoformat() if parsed is not None and has_time else None
 
 
 def _cdata_strip(text: str) -> str:
@@ -257,7 +306,8 @@ class RSSFeedScraper:
 
     def __init__(self, session: Optional[requests.Session] = None):
         self.session = session or _make_session()
-        # Populated by scrape_all(); maps source key -> "ok (N)" | "failed: msg"
+        # Populated by scrape_all(); maps each source to detailed included /
+        # excluded / duplicate counts, or to "failed: <message>".
         self.source_status: Dict[str, str] = {}
 
     @staticmethod
@@ -326,6 +376,8 @@ class RSSFeedScraper:
                 )
                 pub_date = _parse_date(raw_date)
                 pub_hour = _parse_hour(raw_date)
+                pub_timestamp = _parse_timestamp(raw_date)
+                source_item_id = (item.findtext("guid") or "").strip() or None
 
                 headlines.append(
                     {
@@ -333,8 +385,11 @@ class RSSFeedScraper:
                         "url":            link or None,
                         "published_at":   pub_date,
                         "published_hour": pub_hour,
+                        "published_timestamp": pub_timestamp,
                         "source":         source_key,
+                        "source_item_id": source_item_id,
                         "category":       classify_headline(title),
+                        "raw_payload":    {"published_raw": raw_date},
                     }
                 )
 
@@ -358,39 +413,62 @@ class RSSFeedScraper:
         seen: set = set()
 
         total_fetched = 0
-        total_dropped_date = 0
-        total_dropped_relevance = 0
-        total_dropped_dedup = 0
+        total_skipped_date = 0
+        total_excluded_relevance = 0
+        total_skipped_dedup = 0
+        total_included = 0
 
         self.source_status = {}
 
         for key, url in feeds.items():
             try:
                 items = self.fetch(url, key)
-                self.source_status[key] = f"ok ({len(items)} items)"
             except Exception as exc:
                 self.source_status[key] = f"failed: {exc}"
                 logger.warning("[RSS] Source %s failed: %s", key, exc)
-                items = []
+                time.sleep(CRAWL_DELAY)
+                continue
 
             total_fetched += len(items)
+            source_old = 0
+            source_duplicates = 0
+            source_excluded = 0
+            source_included = 0
             for h in items:
                 if since and h["published_at"] and h["published_at"] < since:
-                    total_dropped_date += 1
+                    source_old += 1
+                    total_skipped_date += 1
                     continue
-                if RELEVANCE_FILTER_ENABLED and not _is_relevant(h["title"]):
-                    logger.debug("[filter] dropped: %s", h["title"][:80])
-                    total_dropped_relevance += 1
-                    continue
-                # Title-based dedup: same first 80 normalised chars = same story
-                # regardless of which source published it. Prevents the same article
-                # from multiple RSS feeds inflating per-day headline counts.
-                dedup_key = _normalise(h["title"])[:80]
+
+                # Deduplicate only a stable identity within the same source.
+                # Identical text from different outlets is a distinct observation.
+                dedup_key = _observation_identity(h)
                 if dedup_key in seen:
-                    total_dropped_dedup += 1
+                    source_duplicates += 1
+                    total_skipped_dedup += 1
                     continue
                 seen.add(dedup_key)
-                all_headlines.append(h)
+
+                observation = _with_exclusion_metadata(h)
+                if observation["is_excluded"]:
+                    source_excluded += 1
+                    total_excluded_relevance += 1
+                    logger.debug(
+                        "[filter] retained as excluded (%s): %s",
+                        observation["exclusion_rule"],
+                        observation["title"][:80],
+                    )
+                else:
+                    source_included += 1
+                    total_included += 1
+                all_headlines.append(observation)
+
+            source_returned = source_included + source_excluded
+            self.source_status[key] = (
+                f"ok (fetched={len(items)}, returned={source_returned}, "
+                f"included={source_included}, excluded={source_excluded}, "
+                f"too_old={source_old}, duplicates={source_duplicates})"
+            )
             time.sleep(CRAWL_DELAY)
 
         failed = [k for k, v in self.source_status.items() if v.startswith("failed")]
@@ -400,12 +478,14 @@ class RSSFeedScraper:
             logger.critical("[RSS] ALL sources failed - no headlines collected")
 
         logger.info(
-            "RSS pipeline: %d fetched | %d too-old | %d off-topic | %d dedup | %d kept",
+            "RSS pipeline: %d fetched | %d too-old | %d same-source dedup | "
+            "%d returned (%d included, %d excluded)",
             total_fetched,
-            total_dropped_date,
-            total_dropped_relevance,
-            total_dropped_dedup,
+            total_skipped_date,
+            total_skipped_dedup,
             len(all_headlines),
+            total_included,
+            total_excluded_relevance,
         )
         return all_headlines
 
@@ -426,6 +506,10 @@ class InvestingTRScraper:
     def scrape(self, max_pages: int = 3) -> List[Dict]:
         headlines: List[Dict] = []
         seen: set = set()
+        total_fetched = 0
+        total_included = 0
+        total_excluded = 0
+        total_duplicates = 0
 
         for page in range(1, max_pages + 1):
             url = (
@@ -462,7 +546,11 @@ class InvestingTRScraper:
 
                     title = title_el.get_text(strip=True)
                     href = title_el.get("href", "")
-                    link = href if href.startswith("http") else self.BASE + href
+                    link = (
+                        href if href.startswith("http")
+                        else (self.BASE + href if href else "")
+                    )
+                    total_fetched += 1
 
                     date_el = art.select_one("time") or art.select_one(".date")
                     raw_date = (
@@ -471,32 +559,50 @@ class InvestingTRScraper:
                         else ""
                     )
                     pub_date = _parse_date(raw_date)
+                    pub_hour = _parse_hour(raw_date)
+                    pub_timestamp = _parse_timestamp(raw_date)
 
-                    if RELEVANCE_FILTER_ENABLED and not _is_relevant(title):
-                        continue
-
-                    dedup_key = link or title[:120].lower()
+                    raw_observation = {
+                        "title":        title,
+                        "url":          link or None,
+                        "published_at": pub_date,
+                        "published_hour": pub_hour,
+                        "published_timestamp": pub_timestamp,
+                        "source":       "investing_tr_html",
+                        "category":     classify_headline(title),
+                        "raw_payload":  {"published_raw": raw_date},
+                    }
+                    dedup_key = _observation_identity(raw_observation)
                     if dedup_key in seen:
+                        total_duplicates += 1
                         continue
                     seen.add(dedup_key)
 
-                    headlines.append(
-                        {
-                            "title":        title,
-                            "url":          link or None,
-                            "published_at": pub_date,
-                            "source":       "investing_tr_html",
-                            "category":     classify_headline(title),
-                        }
-                    )
+                    observation = _with_exclusion_metadata(raw_observation)
+                    if observation["is_excluded"]:
+                        total_excluded += 1
+                    else:
+                        total_included += 1
+                    headlines.append(observation)
 
-                logger.info("[HTML] page %d -> %d headlines so far", page, len(headlines))
+                logger.info(
+                    "[HTML] page %d -> %d observations so far "
+                    "(%d included, %d excluded, %d same-source duplicates)",
+                    page, len(headlines), total_included, total_excluded,
+                    total_duplicates,
+                )
                 time.sleep(CRAWL_DELAY * 1.5)  # slightly slower for HTML pages
 
             except requests.RequestException as exc:
                 logger.warning("[HTML] Request failed (page %d): %s", page, exc)
                 break
 
+        logger.info(
+            "HTML pipeline: %d fetched | %d same-source dedup | "
+            "%d returned (%d included, %d excluded)",
+            total_fetched, total_duplicates, len(headlines), total_included,
+            total_excluded,
+        )
         return headlines
 
 
@@ -510,8 +616,9 @@ def get_headlines(
     """
     Fetch headlines from all configured sources.
 
-    Returns a deduplicated list of headline dicts, filtered to the last
+    Returns source-distinct headline observations filtered to the last
     ``lookback_days`` days (headlines with no date are always included).
+    Relevance exclusions remain in the list with explicit metadata.
     """
     since = date.today() - timedelta(days=lookback_days)
     session = _make_session()
@@ -530,5 +637,9 @@ def get_headlines(
             if h["published_at"] is None or h["published_at"] >= since
         ]
 
-    logger.info("Total unique headlines fetched: %d", len(headlines))
+    excluded = sum(1 for h in headlines if h.get("is_excluded"))
+    logger.info(
+        "Total observations returned: %d (%d included, %d excluded)",
+        len(headlines), len(headlines) - excluded, excluded,
+    )
     return headlines

@@ -20,30 +20,73 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
+import database as db
+from config import DB_PATH, MINIMUM_HEADLINES_PER_DAY
 from polarization_analysis import PRO_GOV, OPPOSITION
 
 
-def load():
-    con = sqlite3.connect("finance_sentiment.db")
-    ext = pd.read_sql_query("SELECT date, series, value FROM external_series", con)
+def load(db_path: str = DB_PATH):
+    con = sqlite3.connect(db_path)
+    try:
+        ext = pd.read_sql_query(
+            "SELECT date, series, value FROM external_series", con
+        )
+        bist = pd.read_sql_query(
+            "SELECT date, close FROM bist100_prices ORDER BY date", con
+        )
+        fx = pd.read_sql_query(
+            "SELECT date, close FROM market_factors "
+            "WHERE symbol='USDTRY=X' ORDER BY date",
+            con,
+        )
+        # Polarization remains a separate, publication-date descriptive view.
+        h = pd.read_sql_query(
+            "SELECT source, published_at AS date, sentiment_score AS s "
+            "FROM headlines WHERE sentiment_score IS NOT NULL",
+            con,
+        )
+    finally:
+        con.close()
+
     ext = ext.pivot(index="date", columns="series", values="value")
-    bist = pd.read_sql_query("SELECT date, daily_return FROM bist100_prices", con).set_index("date")
-    fx = pd.read_sql_query(
-        "SELECT date, close FROM market_factors WHERE symbol='USDTRY=X'", con).set_index("date")
-    fx["usdtry_ret"] = fx["close"].pct_change() * 100
-    sent = pd.read_sql_query(
-        "SELECT date, avg_score, headline_count FROM daily_sentiment", con).set_index("date")
-    sent = sent[sent["headline_count"] >= 3][["avg_score"]]
-    # polarization index
-    h = pd.read_sql_query(
-        "SELECT source, published_at AS date, sentiment_score AS s FROM headlines WHERE sentiment_score IS NOT NULL", con)
+    ext.index = pd.to_datetime(ext.index)
+
+    # Compute returns and leads on each complete, ordered market table before
+    # joining sparse external or sentiment dates. This makes t+1 the actual
+    # subsequent observation rather than the next surviving joined row.
+    bist["date"] = pd.to_datetime(bist["date"])
+    bist = bist.sort_values("date")
+    bist["daily_return"] = bist["close"].pct_change(fill_method=None) * 100.0
+    bist["bist_ret_next"] = bist["daily_return"].shift(-1)
+    bist = bist.set_index("date")
+
+    fx["date"] = pd.to_datetime(fx["date"])
+    fx = fx.sort_values("date")
+    fx["usdtry_ret"] = fx["close"].pct_change(fill_method=None) * 100.0
+    fx["usdtry_ret_next"] = fx["usdtry_ret"].shift(-1)
+    fx = fx.set_index("date")
+
+    # Market-linked press sentiment has no publication-date-table fallback.
+    # avg_score is only a local compatibility alias for the unweighted baseline.
+    sent = db.get_signal_variants(db_path=db_path).rename(
+        columns={"simple_mean": "avg_score"}
+    )
+    sent["date"] = pd.to_datetime(sent["date"])
+    sent = sent.set_index("date")
+    sent = sent[sent["headline_count"] >= MINIMUM_HEADLINES_PER_DAY][
+        ["avg_score"]
+    ]
+
+    # Publication-date polarization index (descriptive, not a market signal).
+    h["date"] = pd.to_datetime(h["date"])
     def camp_daily(src):
         g = h[h["source"].isin(src)].groupby("date").agg(m=("s", "mean"), n=("s", "size"))
         return g[g["n"] >= 2]["m"]
     pol = (camp_daily(PRO_GOV) - camp_daily(OPPOSITION)).rename("polarization")
 
-    df = ext.join(bist).join(fx[["close", "usdtry_ret"]]).join(sent).join(pol)
-    df.index = pd.to_datetime(df.index)
+    df = ext.join(bist[["daily_return", "bist_ret_next"]]).join(
+        fx[["close", "usdtry_ret", "usdtry_ret_next"]]
+    ).join(sent).join(pol)
     df = df.sort_index()
     # CHANGES, not levels: search interest and prices both trend over the period,
     # and correlating trending levels inflates r (a real trap — GDELT tone vs the
@@ -51,8 +94,6 @@ def load():
     df["dolar_chg"] = df["gt_dolar"].diff()
     df["kriz_chg"] = df["gt_kriz"].diff()
     df["tone_chg"] = df["gdelt_tone"].diff()
-    df["usdtry_ret_next"] = df["usdtry_ret"].shift(-1)
-    df["bist_ret_next"] = df["daily_return"].shift(-1)
     return df
 
 
@@ -71,15 +112,15 @@ def main():
     tests = [
         # public attention <-> the lira (on CHANGES, stationary)
         ("PUBLIC", "d(dolar-search) vs d(USD/TRY), same day", "dolar_chg", "usdtry_ret"),
-        ("PUBLIC", "d(dolar-search) vs NEXT-day d(USD/TRY)", "dolar_chg", "usdtry_ret_next"),
-        ("PUBLIC", "d(kriz-search) vs next-day BIST return", "kriz_chg", "bist_ret_next"),
+        ("PUBLIC", "d(dolar-search) vs subsequent d(USD/TRY)", "dolar_chg", "usdtry_ret_next"),
+        ("PUBLIC", "d(kriz-search) vs subsequent-session BIST return", "kriz_chg", "bist_ret_next"),
         # public <-> press
-        ("PUB<>PRESS", "d(dolar-search) vs press sentiment", "dolar_chg", "avg_score"),
+        ("PUB<>PRESS", "d(dolar-search) vs session-aligned unweighted press sentiment", "dolar_chg", "avg_score"),
         ("PUB<>PRESS", "d(dolar-search) vs media polarization", "dolar_chg", "polarization"),
         # global media <-> domestic (tone is bounded, less trending; also test on changes)
-        ("GLOBAL", "global tone (GDELT) vs domestic press sentiment", "gdelt_tone", "avg_score"),
+        ("GLOBAL", "global tone vs session-aligned unweighted press sentiment", "gdelt_tone", "avg_score"),
         ("GLOBAL", "d(global tone) vs d(USD/TRY)", "tone_chg", "usdtry_ret"),
-        ("GLOBAL", "d(global tone) vs domestic press sentiment", "tone_chg", "avg_score"),
+        ("GLOBAL", "d(global tone) vs session-aligned unweighted press sentiment", "tone_chg", "avg_score"),
     ]
     res = []
     for block, name, a, b in tests:
@@ -120,7 +161,8 @@ def main():
     plt.setp(ax[0].get_xticklabels(), rotation=30, ha="right")
     d2 = df.dropna(subset=["gdelt_tone", "avg_score"])
     ax[1].scatter(d2["gdelt_tone"], d2["avg_score"], alpha=0.5, color="#6A1B9A")
-    ax[1].set_xlabel("global media tone (GDELT)"); ax[1].set_ylabel("domestic press sentiment")
+    ax[1].set_xlabel("global media tone (GDELT)")
+    ax[1].set_ylabel("session-aligned unweighted press sentiment")
     ax[1].set_title("World's view vs domestic press", fontweight="bold")
     ax[1].axhline(0, color="grey", lw=0.6); ax[1].axvline(0, color="grey", lw=0.6)
     fig.tight_layout(rect=[0, 0, 1, 0.94])

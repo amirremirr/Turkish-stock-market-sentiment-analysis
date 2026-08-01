@@ -2,19 +2,23 @@
 LLM-based sentiment scoring (OpenAI gpt-5-mini) — drop-in alternative to the
 XLM-RoBERTa scorer in sentiment.py.
 
-Why this exists: benchmarked on 2026-06-12 against 198 human-labeled headlines,
-gpt-5-mini with 30 few-shot examples scored 84.5% on held-out data vs 76.8% for
-XLM-R with thresholds tuned in-sample. See benchmark_llm.py for the methodology.
+Why this exists: held-out scorer comparisons led to the current p3 prompt. On
+the canonical 270-row held-out set, p3 reached 83.3% categorical agreement with
+the project's human-label rubric. This is rubric agreement, not objective truth,
+calibration, or predictive evidence. See benchmark_llm.py and LABELING.md.
 
 Interface contract (same as sentiment.SentimentScorer):
-    scorer.score(texts) -> list of (score, label, p_pos, p_neu, p_neg) tuples
+    scorer.score(texts) -> aligned list of score tuples or None for omissions
+    scorer.score_partial(texts) -> {input_index: score tuple}
+    scorer.analyze_partial(texts) -> {input_index: analysis dict}
     scorer.model_name   -> stored in headlines.model_name for provenance
 
 Score/label consistency: the LLM returns a label plus a strength in [0, 1].
 We derive  score = +strength | -strength | 0.0  so that the stored continuous
 score ALWAYS agrees with the label under the +-0.05 config thresholds, and the
-confidence-weighted daily aggregation keeps working unchanged. Pseudo-probs are
-derived so that p_pos - p_neg == score, which keeps `main.py relabel` coherent.
+legacy component/storage contract remains available for sensitivity variants. Synthetic
+compatibility components are derived so p_pos - p_neg == score; they are not
+calibrated probabilities or estimates of correctness.
 
 Requires OPENAI_API_KEY (env var or .env). Fails loudly if missing — silent
 fallback to a different scorer would mix two scoring regimes in the DB.
@@ -25,17 +29,26 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 import requests
 
 from config import (
+    LLM_HTTP_RETRY_BACKOFF_SECONDS,
+    LLM_HTTP_RETRY_LIMIT,
+    LLM_SCORING_MAX_ATTEMPTS,
     LLM_SENTIMENT_MODEL,
     LLM_SENTIMENT_BATCH_SIZE,
     SENTIMENT_POSITIVE_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
+
+# Stored alongside LLM results so downstream code cannot mistake the derived
+# p_* compatibility fields for calibrated class probabilities.
+SCORE_COMPONENTS_KIND = "synthetic_compatibility"
+
+_T = TypeVar("_T")
 
 # Bump whenever _SYSTEM_PROMPT_BASE, _ANALYZE_PROMPT_EXTRA, or the few-shot set
 # changes — stored with every scored row (model_name column) so results are
@@ -187,8 +200,10 @@ def _build_system_prompt() -> str:
         prompt += ("\nHere are examples labeled by our analyst — match their "
                    "labeling style and judgment:\n\n" + lines + "\n")
     except FileNotFoundError:
-        logger.warning("fewshot_examples.json not found — running zero-shot "
-                       "(benchmarked 82.3%% vs 84.5%% with examples)")
+        logger.warning(
+            "fewshot_examples.json not found — running outside the documented "
+            "p3 few-shot configuration; results are not benchmark-comparable"
+        )
     return prompt
 
 
@@ -197,7 +212,10 @@ def _to_tuple(label: str, strength: float) -> Tuple[float, str, float, float, fl
     Convert (label, strength) to the scorer tuple contract.
 
     Guarantees: label agrees with score under the config thresholds, and
-    p_pos - p_neg == score (so relabel_from_probs reproduces the label).
+    p_pos - p_neg == score (so the compatibility relabel path reproduces it).
+
+    The three derived components are synthetic compatibility values. They are
+    not calibrated class probabilities or model-confidence estimates.
     """
     strength = max(0.0, min(1.0, float(strength)))
     if label == "positive":
@@ -208,11 +226,61 @@ def _to_tuple(label: str, strength: float) -> Tuple[float, str, float, float, fl
     if label == "negative":
         score = -max(strength, SENTIMENT_POSITIVE_THRESHOLD + 0.01)
         return score, "negative", 0.0, 1.0 + score, -score
-    return 0.0, "neutral", 0.0, 1.0, 0.0
+    if label == "neutral":
+        return 0.0, "neutral", 0.0, 1.0, 0.0
+    raise ValueError(f"unsupported sentiment label: {label!r}")
+
+
+def _validated_partial(
+    items: List[dict],
+    expected_ids: set[int],
+    converter: Callable[[dict], _T],
+    operation: str,
+) -> Dict[int, _T]:
+    """Return only unambiguous, valid results for the current request batch.
+
+    An omitted ID remains absent. A duplicate invalidates that ID entirely, and
+    an ID outside the current batch is ignored. This deliberately makes an
+    incomplete response visible to the caller instead of manufacturing a
+    neutral observation.
+    """
+    results: Dict[int, _T] = {}
+    invalid_ids: set[int] = set()
+
+    for item in items:
+        try:
+            raw_id = item["id"]
+            if isinstance(raw_id, bool) or not isinstance(raw_id, int):
+                raise ValueError("IDs must be JSON integers")
+            idx = raw_id
+        except (KeyError, TypeError, ValueError):
+            logger.warning("LLM %s: ignored result with invalid or missing id", operation)
+            continue
+
+        if idx not in expected_ids:
+            logger.warning("LLM %s: ignored out-of-range id %s", operation, idx)
+            continue
+
+        if idx in results or idx in invalid_ids:
+            results.pop(idx, None)
+            invalid_ids.add(idx)
+            logger.warning("LLM %s: duplicate id %s invalidated", operation, idx)
+            continue
+
+        try:
+            results[idx] = converter(item)
+        except (KeyError, TypeError, ValueError) as exc:
+            invalid_ids.add(idx)
+            logger.warning("LLM %s: invalid result for id %s (%s)", operation, idx, exc)
+
+    return results
 
 
 class LLMSentimentScorer:
     """Batch sentiment scorer backed by the OpenAI API."""
+
+    score_components_kind = SCORE_COMPONENTS_KIND
+    max_scoring_attempts = LLM_SCORING_MAX_ATTEMPTS
 
     def __init__(self, model: str = LLM_SENTIMENT_MODEL,
                  batch_size: int = LLM_SENTIMENT_BATCH_SIZE):
@@ -255,7 +323,8 @@ class LLMSentimentScorer:
             payload["reasoning_effort"] = "low"
 
         last_err = None
-        for attempt in range(4):
+        attempt_limit = max(1, int(LLM_HTTP_RETRY_LIMIT))
+        for attempt in range(attempt_limit):
             try:
                 resp = requests.post(
                     "https://api.openai.com/v1/chat/completions",
@@ -266,15 +335,17 @@ class LLMSentimentScorer:
             except requests.RequestException as exc:
                 # Dropped connections / timeouts are as transient as a 503.
                 last_err = f"{type(exc).__name__}"
-                wait = 15 * (attempt + 1)
-                logger.warning("LLM scorer: %s — retrying in %ds", last_err, wait)
-                time.sleep(wait)
+                if attempt + 1 < attempt_limit:
+                    wait = LLM_HTTP_RETRY_BACKOFF_SECONDS * (attempt + 1)
+                    logger.warning("LLM scorer: %s — retrying in %ds", last_err, wait)
+                    time.sleep(wait)
                 continue
             if resp.status_code in (429, 500, 503):
                 last_err = f"HTTP {resp.status_code}"
-                wait = 15 * (attempt + 1)
-                logger.warning("LLM scorer: transient %s — retrying in %ds", last_err, wait)
-                time.sleep(wait)
+                if attempt + 1 < attempt_limit:
+                    wait = LLM_HTTP_RETRY_BACKOFF_SECONDS * (attempt + 1)
+                    logger.warning("LLM scorer: transient %s — retrying in %ds", last_err, wait)
+                    time.sleep(wait)
                 continue
             resp.raise_for_status()
             body = resp.json()
@@ -284,87 +355,110 @@ class LLMSentimentScorer:
             if api_model and "/" not in self.model_name:
                 self.model_name = f"{api_model}/{PROMPT_VERSION}"
             return body
-        raise RuntimeError(f"LLM scorer: still failing after 4 attempts (last: {last_err})")
+        raise RuntimeError(
+            f"LLM scorer: still failing after {attempt_limit} attempts (last: {last_err})"
+        )
 
-    def score(self, texts: List[str]) -> List[Tuple[float, str, float, float, float]]:
-        """Score a list of headlines. Returns tuples aligned with `texts`."""
-        if not texts:
-            return []
+    @staticmethod
+    def _response_array(body: dict, field: str, operation: str) -> List[dict]:
+        """Extract a structured-output array or fail without inventing rows."""
+        try:
+            content = body["choices"][0]["message"]["content"]
+            items = json.loads(content)[field]
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"LLM {operation}: malformed structured response") from exc
+        if not isinstance(items, list):
+            raise RuntimeError(f"LLM {operation}: response field {field!r} is not an array")
+        return items
 
-        results: dict[int, Tuple[float, str, float, float, float]] = {}
-        batches = [list(enumerate(texts))[i:i + self.batch_size]
-                   for i in range(0, len(texts), self.batch_size)]
+    def score_partial(
+        self, texts: List[str]
+    ) -> Dict[int, Tuple[float, str, float, float, float]]:
+        """Return valid scores keyed by input index; missing rows stay absent."""
+        results: Dict[int, Tuple[float, str, float, float, float]] = {}
+        indexed = list(enumerate(texts))
+        batches = [indexed[i:i + self.batch_size]
+                   for i in range(0, len(indexed), self.batch_size)]
 
         for n, batch in enumerate(batches, 1):
             listing = "\n".join(f"{idx}. {title}" for idx, title in batch)
             body = self._request(listing)
-            text = body["choices"][0]["message"]["content"]
-            for item in json.loads(text)["labels"]:
-                idx = int(item["id"])
-                if 0 <= idx < len(texts):
-                    results[idx] = _to_tuple(item["label"], item.get("strength", 0.5))
+            items = self._response_array(body, "labels", "score")
+            expected = {idx for idx, _ in batch}
+            parsed = _validated_partial(
+                items,
+                expected,
+                lambda item: _to_tuple(item["label"], item["strength"]),
+                "score",
+            )
+            results.update(parsed)
+            missing = sorted(expected - parsed.keys())
+            if missing:
+                logger.warning(
+                    "LLM scorer: batch %d/%d omitted or invalidated %d item(s): %s",
+                    n, len(batches), len(missing), missing[:10],
+                )
             logger.info("LLM scorer: batch %d/%d done (%d/%d scored)",
                         n, len(batches), len(results), len(texts))
 
-        # Any headline the model skipped gets a neutral default (rare; logged).
-        missing = [i for i in range(len(texts)) if i not in results]
-        if missing:
-            logger.warning("LLM scorer: %d headline(s) missing from response — "
-                           "defaulting to neutral 0.0: %s", len(missing), missing[:10])
-            for i in missing:
-                results[i] = (0.0, "neutral", 0.0, 1.0, 0.0)
+        return results
 
-        return [results[i] for i in range(len(texts))]
+    def score(
+        self, texts: List[str]
+    ) -> List[Optional[Tuple[float, str, float, float, float]]]:
+        """Return an aligned list, using ``None`` for every missing result."""
+        partial = self.score_partial(texts)
+        return [partial.get(i) for i in range(len(texts))]
 
-
-    def analyze(self, texts: List[str]) -> List[dict]:
+    def analyze_partial(self, texts: List[str]) -> Dict[int, dict]:
         """
         Combined sentiment + category + relevance analysis in one API call
-        per batch. Returns dicts aligned with `texts`:
+        per batch. Returns valid dicts keyed by input index:
             {score, label, p_pos, p_neu, p_neg, category, relevance}
-        relevance is a 0.0-1.0 grade — NOTHING is deleted on its basis; the
-        aggregation weights low-relevance headlines toward zero instead.
-        Used by the scoring step (full analysis of new headlines) and by
-        `main.py recategorize --llm` (category/relevance refresh).
+        Missing, duplicate, malformed, and out-of-range results are not present.
         """
-        if not texts:
-            return []
-
         system_prompt = self._system_prompt + _ANALYZE_PROMPT_EXTRA
-        results: dict[int, dict] = {}
-        batches = [list(enumerate(texts))[i:i + self.batch_size]
-                   for i in range(0, len(texts), self.batch_size)]
+        results: Dict[int, dict] = {}
+        indexed = list(enumerate(texts))
+        batches = [indexed[i:i + self.batch_size]
+                   for i in range(0, len(indexed), self.batch_size)]
+
+        def convert(item: dict) -> dict:
+            if item["category"] not in CATEGORIES:
+                raise ValueError(f"unsupported category: {item['category']!r}")
+            score, label, p_pos, p_neu, p_neg = _to_tuple(
+                item["label"], item["strength"])
+            return {
+                "score": score, "label": label,
+                "p_pos": p_pos, "p_neu": p_neu, "p_neg": p_neg,
+                "category": item["category"],
+                "relevance": max(0.0, min(1.0, float(item["relevance"]))),
+                "score_components_kind": SCORE_COMPONENTS_KIND,
+            }
 
         for n, batch in enumerate(batches, 1):
             listing = "\n".join(f"{idx}. {title}" for idx, title in batch)
             body = self._request(listing, system_prompt=system_prompt,
                                  schema=_ANALYZE_SCHEMA, schema_name="headline_analyses")
-            text = body["choices"][0]["message"]["content"]
-            for item in json.loads(text)["analyses"]:
-                idx = int(item["id"])
-                if 0 <= idx < len(texts):
-                    score, label, p_pos, p_neu, p_neg = _to_tuple(
-                        item["label"], item.get("strength", 0.5))
-                    category = item["category"] if item["category"] in CATEGORIES else "other"
-                    results[idx] = {
-                        "score": score, "label": label,
-                        "p_pos": p_pos, "p_neu": p_neu, "p_neg": p_neg,
-                        "category": category,
-                        "relevance": max(0.0, min(1.0, float(item["relevance"]))),
-                    }
+            items = self._response_array(body, "analyses", "analyze")
+            expected = {idx for idx, _ in batch}
+            parsed = _validated_partial(items, expected, convert, "analyze")
+            results.update(parsed)
+            missing = sorted(expected - parsed.keys())
+            if missing:
+                logger.warning(
+                    "LLM analyze: batch %d/%d omitted or invalidated %d item(s): %s",
+                    n, len(batches), len(missing), missing[:10],
+                )
             logger.info("LLM analyze: batch %d/%d done (%d/%d)",
                         n, len(batches), len(results), len(texts))
 
-        missing = [i for i in range(len(texts)) if i not in results]
-        if missing:
-            logger.warning("LLM analyze: %d headline(s) missing — defaulting to "
-                           "neutral/other/relevance 1.0: %s", len(missing), missing[:10])
-            for i in missing:
-                results[i] = {"score": 0.0, "label": "neutral", "p_pos": 0.0,
-                              "p_neu": 1.0, "p_neg": 0.0, "category": "other",
-                              "relevance": 1.0}
+        return results
 
-        return [results[i] for i in range(len(texts))]
+    def analyze(self, texts: List[str]) -> List[Optional[dict]]:
+        """Return aligned analyses, using ``None`` for every missing result."""
+        partial = self.analyze_partial(texts)
+        return [partial.get(i) for i in range(len(texts))]
 
 
 # -- Module-level singleton (mirrors sentiment.get_scorer) -----------------------

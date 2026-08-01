@@ -60,7 +60,8 @@ def _extract_score(result: List[dict]) -> Tuple[float, str, float, float, float]
     p_neg = scores.get("negative", 0.0)
     p_neu = scores.get("neutral",  0.0)
     continuous = p_pos - p_neg
-    # Threshold-based label (tuned 2026-06-08 on 198 human labels, accuracy 76.8%).
+    # Threshold-based label (tuned 2026-06-08 on 198 human labels; rubric
+    # agreement 76.8% on that same tuning sample).
     # Wider neutral band fixes model's over-calling of negative on routine financial text.
     if continuous > SENTIMENT_POSITIVE_THRESHOLD:
         dominant = "positive"

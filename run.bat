@@ -12,8 +12,8 @@ REM   run.bat scrape                       fetch latest headlines only
 REM   run.bat score                        score unscored headlines with the sentiment model
 REM   run.bat aggregate                    recompute daily sentiment averages
 REM   run.bat recategorize                 re-classify all headlines with keyword rules + re-aggregate
-REM   run.bat recategorize --llm           re-classify with the LLM + delete irrelevant headlines
-REM   run.bat relabel                      recompute sentiment labels from stored probs (after threshold change)
+REM   run.bat recategorize --llm           re-classify with the LLM + grade relevance
+REM   run.bat relabel                      recompute labels from stored score components
 REM   run.bat prices                       download BIST 100 price history
 REM   run.bat fx-rates                     download USD/TRY FX rates (Alpha Vantage)
 REM   run.bat plot                         generate the visualisation

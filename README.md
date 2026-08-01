@@ -2,98 +2,115 @@
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-risk--mapped-blue.svg)
 ![Sentiment](https://img.shields.io/badge/sentiment-gpt--5--mini-orange.svg)
 ![Status](https://img.shields.io/badge/status-active%20research-yellow.svg)
 
-This project investigates whether sentiment extracted from Turkish financial news contains predictive information about subsequent **BIST 100** returns. It combines automated news collection, multilingual transformer models, human-validated evaluation, and time-series analysis in a reproducible research pipeline.
+This is an AI-assisted research pipeline for Turkish financial news. Its strongest contribution is the auditable collection, scoring, market-session alignment, and evaluation process - not a validated trading signal.
 
-> **Research question:** Does the sentiment of Turkish financial news on day *t* predict the direction of BIST 100 on day *t+1*?
+The repository has three separate research areas:
 
-The implementation was developed with AI-assisted coding tools, while the research design, data collection, validation methodology, evaluation framework, and experimental decisions were designed and reviewed by me. The repository documents the reasoning behind important choices so that the work can be inspected and reproduced.
+1. **Sentiment and relevance measurement quality** - how consistently the scorer follows the project's written human-label rubric.
+2. **Media framing and polarization** - descriptive outlet-associated differences in story selection and tone.
+3. **Exploratory prediction** - whether session-aligned news measurements contain information about subsequent BIST 100 returns.
 
-> **Current scope (late June 2026):** The corpus contains ~1,200 headlines collected since March. gpt-5-mini reaches **~83% agreement with held-out human labels**, and the relevance filter reaches **~91%**. The predictive analysis remains preliminary: 30 reliable overlapping news-and-market days are required, and the current dataset has 22. These validation figures measure agreement with human annotations, not predictive power.
+The third area remains exploratory. The project has not demonstrated validated alpha and is not a trading strategy.
+
+The implementation was developed with AI-assisted coding tools, while the research design, data collection, validation methodology, evaluation framework, and experimental decisions were designed and reviewed by me. Important choices, corrections, and remaining risks are documented so the work can be inspected rather than inferred from a passing test count.
+
+For the active LLM backend, the model returns sentiment direction and model-reported sentiment intensity. Stored positive, neutral, and negative components derived from those values are **synthetic compatibility fields**, not calibrated probabilities of class membership, correctness, or statistical confidence.
+
+## Current project status
+
+| Item | Current state |
+|---|---|
+| Production scorer | OpenAI `gpt-5-mini`, prompt version `p3`; XLM-RoBERTa remains an offline fallback |
+| Processing integrity | Explicit `pending`, `scored`, `retry_pending`, and `failed` states; omitted items are retried and never fabricated as neutral |
+| Raw-data handling | Source-distinct fetched observations are audited before canonical deduplication; filtering uses reversible, versioned exclusions; permanent deletion is a guarded code-level operation |
+| Predictive baseline | Session-aligned `daily_signal_variants.simple_mean`; relevance-, intensity/relevance-, and full-weighted variants are retained for sensitivity analysis |
+| Run health | Final `success` / `degraded` / `failed` outcome plus scrape, scoring, aggregation, market-data, and audit component states and structured diagnostics |
+| Polarization inference | Raw means/effect size, date-cluster bootstrap, topic/date controls, clustered sensitivities, and separate selection/framing outputs; observational only |
+| Public demo | `python -m scripts.demo`; committed cached scores and prices, no API key, model download, private DB, or network |
+| Current automation | GitHub Actions on weekdays at 06:30 UTC (09:30 Istanbul); the SQLite snapshot is persisted on the `data` branch |
+| Sample snapshots | Local checked-in DB: 2026-03-12 through 2026-07-07; latest known `origin/data` snapshot: 2026-07-28. Counts are intentionally omitted because the automated snapshot continues to change |
+| Last methodology update | 2026-08-01 (processing integrity, session variants/alignment, polarization inference, and public demo); scorer prompt `p3` last changed 2026-06-13 |
+| Predictive status | Exploratory and currently unvalidated; no validated alpha, out-of-sample strategy, or trading claim |
+| Event-level migration | Headline aggregation remains primary; event dual-write is enabled, phases 0-2 are built, KAP ingestion is disabled pending production access, and later event-centric phases are pending |
+
+The schema changes are additive. Initializing an existing database adds and backfills metadata where possible; it does not silently re-score headlines, recompute aggregates, or regenerate dated findings and figures. Derived signal tables change only when aggregation is explicitly run, including through commands such as `run`, `aggregate`, `clean`, `restore-exclusion`, or LLM recategorization that deliberately invoke it.
 
 ![Sentiment vs BIST 100](docs/sample_output.png)
 
-*Top: BIST 100 closing price. Middle: daily sentiment (green = bullish, red = bearish; hatched = thin-data days). Bottom: lead–lag scatter and rolling correlation — watermarked PRELIMINARY until there is enough data to mean anything.*
+*Checked-in research-output snapshot. Current chart generation uses the session-aligned unweighted baseline; this historical artifact is not silently regenerated by schema initialization. Crossing the display gate permits exploratory reporting only and does not validate a relationship.*
 
 ---
 
-## The research question, and why it's hard
+## The research question, and why it is hard
 
-The hypothesis sounds simple: positive news today → market up tomorrow. It is genuinely difficult to test honestly, for reasons that are themselves the interesting part:
+The hypothesis sounds simple: positive news today -> market up next session. It is genuinely difficult to test honestly:
 
-- **Markets are roughly efficient.** By the time news is public, prices may already reflect it. Finding *un-priced* information is the whole game.
-- **Causality runs both ways.** Sentiment may *react* to prices rather than lead them. A model that scores headlines beautifully can still just be measuring yesterday's move.
-- **Daily frequency is noisy.** With one data point per trading day, any real effect is buried under everything else that moves a market.
+- **Markets are roughly efficient.** By the time news is public, prices may already reflect it.
+- **Causality runs both ways.** Sentiment may react to prices rather than lead them.
+- **Daily frequency is noisy.** With one observation per trading session, a small effect is buried under everything else moving the market.
 
-The null hypothesis is **"no signal."** The pipeline is designed to test it fairly, with safeguards against overfitting and misleading alignment.
-
----
+The null hypothesis is **no signal**. The pipeline is designed to test it fairly, with safeguards against look-ahead, silent missing-data substitution, and misleading date alignment.
 
 ## What I decided, and why
 
-**1. Benchmark before you believe a model.** The first scorer (XLM-RoBERTa, a Twitter-trained multilingual model) reported 76.8% accuracy — but that number was measured on the very labels used to tune it. In-sample numbers flatter you. I required a *held-out* benchmark before trusting any scorer, then ran a bake-off — XLM-RoBERTa vs Google's Gemini vs OpenAI's gpt-5-mini — on human-labeled headlines the models had never seen. gpt-5-mini won at **83% held-out** and became the production scorer. The rule "no accuracy claim without a held-out number" is the single most important habit in this repo.
+**1. Benchmark before believing a model.** The first scorer, a Twitter-trained multilingual XLM-RoBERTa model, showed 76.8% agreement with the project's human-label rubric on labels also used to tune its thresholds. A held-out comparison of XLM-RoBERTa, Gemini, and gpt-5-mini led to the current scorer. Prompt `p3` shows **83.3% categorical agreement** on the 270 held-out canonical labels. This measures agreement with one project's rubric, not objective truth, predictive power, or model confidence.
 
-**2. Grade relevance; never delete data.** To cut noise (celebrity, sports, lottery stories that slip through the filter), the AI's first implementation simply *deleted* headlines it judged irrelevant. I overruled it: an **unvalidated judgment may down-weight data, but must never destroy it.** We rebuilt it as a 0–1 relevance grade that shrinks a headline's weight in the daily average toward zero — reversible, auditable, and tunable from one config value. It was later validated at **91% agreement** with my own keep/drop calls. (The 60 headlines the first version had deleted were restored from a backup.)
+**2. Preserve observations and make filtering reversible.** An early AI-assisted cleanup deleted headlines it judged irrelevant. I overruled that design and restored the affected rows from backup. The current ingestion path records source-distinct fetched observations and filter metadata before canonical deduplication. Keyword and low-LLM-relevance decisions create versioned exclusion-history rows; restoration timestamps the decision rather than erasing it. `clean` now excludes and re-aggregates. Permanent canonical-row deletion is available only through a direct database call with `confirm=True`, and raw observation rows survive with their link cleared.
 
-**3. A "mood" is more than an average.** The daily score is *confidence-weighted* — a decisive headline counts more than a wishy-washy one — but with a floor, so a single loud headline can't hijack an otherwise-quiet day. News is also weighted by time of day (pre-market headlines set the tone; post-close ones can't move that day's price).
+**3. Separate the baseline from weighting assumptions.** The primary predictive signal is now the arithmetic `simple_mean`. The session table also stores relevance-weighted, intensity-and-relevance-weighted, and legacy full-weighted variants. The full variant uses `max(abs(score), 0.10) * relevance * time_weight` under the current neutral source/category defaults. These are sensitivity specifications, not calibrated confidence adjustments, and no preferred variant is selected from the evaluation sample.
 
-**4. Align news to when the market can actually react.** A headline published after the close belongs to the *next* trading session, not the calendar date it was printed. An early version ignored this and silently mismatched ~500 of 750 headlines. The fix — a `signal_date` that rolls post-close and weekend news forward to the next session — is small, but it's the difference between testing the real hypothesis and testing noise.
+**4. Align news to when the market can react.** Publication timestamps are normalized to Europe/Istanbul and classified as `pre_open`, `during_session`, `post_close`, `weekend_or_holiday`, or `unknown`. Pre-open and in-session news maps to that trading session; post-close, non-trading-day, and unknown-time news rolls forward conservatively. The assignment is versioned and observes configured full holidays and half-day closes.
 
-**5. Refuse to over-interpret.** Signal statistics stay hidden behind a 30-day "reliable data" gate; the aggregation weights are **frozen** until there's enough data to tune them honestly; and every accuracy figure is scoped to exactly what it measures. With ~25 data points and a dozen plausible metrics, you can *always* find something that looks significant — so the project pre-commits to not going looking.
+**5. Keep processing failure distinct from neutral judgment.** A model result is stored only when an item is explicitly returned and validated. Missing or invalidated IDs remain NULL, move through configurable item-level retries, and end in `failed` after the configured attempt cap. An explicit zero-score neutral response remains a valid `scored` observation. Only complete `scored` rows without active exclusions enter aggregates.
 
-**6. Trust the source, not just the words.** The project is mid-migration from treating the *headline* as the unit of analysis to treating the *event* as the unit, with sources tiered by quality — official **KAP** company disclosures (Tier A) ranked above general-press RSS (Tier C). The bet, borrowed from the market-microstructure literature, is that structured disclosures carry the signal that lifestyle-heavy news drowns out.
+**6. Refuse to over-interpret.** Signal statistics are hidden until 30 eligible overlapping observations exist. Crossing that gate only permits **exploratory reporting**; it does not make an estimate reliable or validate a strategy. Next-session returns are formed on the complete ordered market-price series before signals are joined.
 
-**7. Don't run a daily job on a laptop.** It began on Windows Task Scheduler and kept dying whenever the machine slept. It now runs itself in the cloud (GitHub Actions), with its database living on a dedicated git branch — no personal hardware in the loop.
+**7. Trust the source, not just the words.** The project is mid-migration from treating the headline as the unit of analysis to treating the event as the unit, with source-quality tiers and a planned official-disclosure path. Event dual-write remains a research bridge; it is not yet the production unit of aggregation.
 
----
+**8. Do not run a daily job on a laptop.** The project moved from Windows Task Scheduler to GitHub Actions, with the database persisted on a dedicated data branch.
 
 ## Quality checks and corrections
 
-These are real mistakes the process surfaced before they could affect a conclusion.
+These are real mistakes surfaced during development:
 
-- **The signal was computed on the wrong days.** "Next-day return" was calculated *after* the data was filtered, so ~40% of the (sentiment, next-day-return) pairs were actually **2–15 days apart** — quietly corrupting every correlation. Caught in a code review; fixed by computing returns on the full, gap-free trading-day series *before* matching them to sentiment.
-- **One news source was triple-counted.** Headlines without a URL slipped past the database's duplicate check on every run (SQLite treats every `NULL` as unique), so one outlet's stories kept inflating the daily average. Caught by the de-duplication audit; fixed with content-based dedup.
-- **The AI deleted data; I caught it.** (See decision #2.) A backup and a skeptical human turned a data-loss bug into a better design.
-- **A crash that was actually a good sign.** A full re-scoring run died on an API error — because the model's *version tag* was accidentally being sent as the model *name*. It failed **loudly and immediately** instead of silently mis-scoring 1,000 headlines. Separating the request field from the provenance field fixed it. (Failing loud beats failing quiet.)
-- **My own labels drifted.** Labeling headlines weeks apart, my share of "neutral" calls jumped from 26% to 59% — hard proof that even the *ground truth* isn't perfectly stable, and that an 83% model must be read against the human ceiling. This led to tooling that measures my own self-consistency, so I know whether the model is the bottleneck or I am.
-- **Tests with an expiry date.** Two tests used hard-coded dates that quietly aged out of the analysis window — they would have started failing on their own as the calendar advanced. Fixed to use dates relative to "today."
+- **Returns were shifted after filtering.** Some supposed next-session pairs were actually 2-15 sessions apart. The fix computes the lead on the complete price series before joining sparse signals, and regression tests now cover the predictive consumers.
+- **One source was repeatedly counted.** NULL URLs do not collide under SQLite uniqueness. Source/title/date deduplication and the raw-observation audit now distinguish replay from genuine cross-source observation.
+- **Missing model items became neutral.** The scorer contract now returns only explicit valid IDs. Missing-only retries preserve NULLs, and exhausted items become `failed` rather than neutral.
+- **The AI deleted data.** The affected rows were restored from backup. Scrape and cleanup decisions are now recorded as reversible exclusions, while permanent deletion requires explicit confirmation.
+- **A model version tag was sent as an API model name.** The run failed loudly; request identity and stored provenance were separated.
+- **Human labels drifted.** A later labeling round had a substantially different neutral share. The project added intra-annotator consistency tooling so model agreement can be read against the stability of the reference labels.
+- **Tests had calendar expiry dates.** Affected tests now use stable fixtures or dates relative to today.
 
-The recurring theme: **backups, loud failures, held-out validation, and an audit layer** are what let a one-person project move fast without lying to itself.
+The recurring theme is that backups, loud failure states, held-out validation, and explicit audit metadata are what make fast iteration inspectable.
 
----
+## What the project can currently support
 
-## Current status
+- Prompt `p3` reached **83.3% categorical agreement with the project's human-label rubric** on 270 held-out labels; the 0.25 relevance cutoff reached **90.7% agreement** with 300 human keep/drop judgments.
+- These measurements assess the project's annotation convention. They are not probabilities of correctness and say nothing about return prediction.
+- The predictive work remains exploratory even after its reporting gate. Any future claim still needs chronological out-of-sample evaluation, controls, costs, and multiple-testing discipline.
+- The four stored variants can be compared with the sensitivity command, but the command deliberately reports no preferred specification.
 
-- **~1,200 headlines** collected daily since March 2026; sentiment scored at **~83% held-out** agreement, relevance at **~91%**.
-- The research question needs 30 reliable overlapping days; the current analysis has **22** (~early July). A genuine out-of-sample answer (walk-forward testing, net of transaction costs) requires ~60 days — roughly mid-August.
-- A null result would still be informative: Turkish daily news sentiment may not predict next-day BIST returns. The evaluation is designed to avoid tuning parameters until a spurious signal appears.
-
-The central contribution is the evaluation discipline around the model: validation, alignment, and safeguards against premature conclusions.
-
----
+The central contribution is the evaluation discipline around the model: explicit labeling conventions, provenance, omission-aware processing, reversible exclusions, versioned session alignment, simple baselines, and visible residual risks.
 
 ## What the news itself looks like
 
-The predictive question needs more data, but the ~1,300-headline corpus already tells a story *now* — pure description, no overfitting risk (`analyze_corpus.py`):
+The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findings are dated snapshots rather than automatically current totals:
 
 ![corpus overview](docs/corpus_overview.png)
 
-- **Currency/lira news skews most bearish** (average −0.19) while Turkish-economy news skews most bullish (+0.14) — consistent with a chronically depreciating lira and upbeat official macro framing.
-- **Outlets differ systematically, not randomly.** Pro-government *Sabah* is both the most on-topic and the most bullish; opposition *Sözcü* is the most bearish — a measurable media-slant effect.
-- An **emerging-markets index, oil, and USD/TRY** are now collected daily alongside BIST, so any eventual signal can be tested *net of* global moves — rather than crediting "all of EM rose today" to Turkish news.
+- **Currency/lira news skews most bearish** in the documented snapshot, while Turkish-economy news skews most bullish.
+- **Outlets show systematic tone differences.** These are outlet-associated descriptive patterns, not causal estimates of political bias.
+- Emerging-markets, oil, and USD/TRY context series are collected so future work can separate Turkey-specific movement from broad market movement.
 
-### Headline finding — a political slant in financial sentiment
-
-Chasing something *non-obvious*, the strongest result came not from the market series (too little data) but from the news ecosystem itself, where there are thousands of observations:
+### Headline finding - an outlet-associated tone difference
 
 ![media polarization](docs/polarization.png)
 
-Turkish financial-news sentiment carries a **large, highly significant political slant** — pro-government/state outlets average **+0.11**, opposition **−0.09**, a gap of **+0.20** (*p ≈ 4×10⁻²⁴*, Cohen's d = 0.74). It replicates on a second independent model (Gemini), so it's in the text, not one scorer's artifact. And it's *political*, not just tonal: the divergence is concentrated in domestic-economic coverage (**+0.21** on macro) and nearly vanishes on externally-set topics (**+0.04** on energy/commodities) — outlets split on how the Turkish economy is doing but agree about oil prices. *(How much is spin vs which stories each camp covers — a genuine open question I tested and only partly resolved — is in the write-up.)* Full detail and caveats: [docs/polarization_findings.md](docs/polarization_findings.md).
-
----
+In the July analysis snapshot, pro-government/state outlets average **+0.11** and the sampled opposition outlet(s) **-0.09**, a descriptive gap of **+0.20** (unclustered *p* approximately 4 x 10^-24; Cohen's *d* = 0.74). A second scorer produced a similar directional gap. Same-story matching suggests story selection explains a substantial part of the aggregate gap; same-event framing is less precisely estimated. These are historical descriptive snapshot results, not a causal claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
 
 ## Run it
 
@@ -101,81 +118,101 @@ Turkish financial-news sentiment carries a **large, highly significant political
 git clone https://github.com/amirremirr/Turkish-stock-market-sentiment-analysis.git
 cd Turkish-stock-market-sentiment-analysis
 
-pip install -r requirements.txt          # full set; requirements-cloud.txt is the slim, no-torch set
-echo "OPENAI_API_KEY=sk-..." > .env       # the LLM scorer; or set SENTIMENT_BACKEND="xlmr" for the offline model
+pip install -r requirements.txt
+echo "OPENAI_API_KEY=sk-..." > .env
 
-run.bat run                               # scrape -> score -> aggregate -> prices -> plot
+run.bat run
 ```
 
-The pipeline also runs **unattended every weekday in the cloud** (GitHub Actions); its SQLite database lives on a `data` branch, and `pull-cloud-db.bat` fetches the latest to inspect locally.
+Set `SENTIMENT_BACKEND="xlmr"` for the offline fallback. The pipeline also runs unattended every weekday in GitHub Actions; `pull-cloud-db.bat` retrieves the latest data-branch snapshot.
 
-**Useful commands** (`run.bat <cmd>` or `python main.py <cmd>`):
+Useful commands (`run.bat <cmd>` or `python main.py <cmd>`):
 
 | Command | What it does |
 |---|---|
-| `run` | Full pipeline end to end |
-| `status` / `dashboard` | DB statistics / self-contained HTML dashboard |
-| `score` · `aggregate` · `relabel` | Re-score, recompute daily aggregates, relabel from stored probabilities |
-| `recategorize --llm` | Re-classify category + relevance with the LLM |
-| `export-labels --n 300 [--uncertain]` | Export headlines for human labeling (random, or active-learning) |
-| `validate-labels <csv>` | Accuracy, confusion matrix, holdout split |
-| `kap-ingest --dry-run` | KAP Tier-A disclosure ingestion (migration, dev-validated) |
-| `run.bat test` | 111-test suite (no GPU or model download) |
+| `run` | Full pipeline end to end, with persisted final and component outcomes |
+| `status` / `dashboard` | Database health and a self-contained HTML dashboard |
+| `score` | Score eligible `pending` / `retry_pending` rows with omission-aware retries |
+| `aggregate` | Explicitly rebuild legacy descriptive tables and canonical session variants |
+| `clean [--dry-run]` | Preview or store reversible off-topic exclusions; no raw row deletion |
+| `restore-exclusion ID` | Restore one active exclusion and rebuild aggregates |
+| `relabel` | Re-derive labels from stored backend-specific components |
+| `recategorize --llm` | Refresh category and relevance, reconcile exclusions, and aggregate |
+| `export-labels --n 300 [--uncertain]` | Export headlines for human labeling |
+| `validate-labels <csv>` | Rubric agreement and confusion-matrix report |
+| `kap-ingest --dry-run` | Validate the KAP Tier-A integration without enabling production ingest |
+| `run.bat test` | Run the regression suite without downloading a model |
 
-Quality audit: `python evaluate.py` runs a read-only 6-layer report (L0 system health → L5 signal statistics, the last gated until 30 reliable days).
+Run the four-variant exploratory sensitivity report with:
 
----
+```bash
+python -m analysis.prediction.sensitivity \
+  --db finance_sentiment.db \
+  --output outputs/signal_sensitivity.json
+```
+
+`python evaluate.py` runs the read-only quality report. Its 30-observation threshold controls reporting only; it does not certify reliability.
+
+Run the observational selection-versus-framing report without changing an
+artifact:
+
+```bash
+python -m analysis.polarization.inference --db finance_sentiment.db
+```
+
+Run the fully offline public demo (no key, model download, private database, or
+network request):
+
+```bash
+python -m scripts.demo --output-dir demo_output
+```
+
+It writes `signal_results.csv`, `audit.json`, and `signal_variants.png`.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Turkish financial news] --> B[RSS scraper]
-    B --> C[(SQLite database)]
-    C --> D[Sentiment model]
-    D --> E[Daily aggregation]
-    E --> F[Market-session alignment]
-    G[BIST 100 market data] --> F
-    F --> H[Evaluation and reporting]
+    A[RSS / HTML observations] --> B[(raw_headline_observations)]
+    B --> C[canonical headlines]
+    C --> X[reversible exclusions]
+    C --> D[omission-aware scoring]
+    D --> E[daily_signal_variants]
+    E --> F[session-aligned predictive consumers]
+    G[BIST 100 sessions] --> F
+    F --> H[evaluation and sensitivity reports]
 ```
 
-The pipeline preserves raw headlines and intermediate metadata, making scores, weights, market-session assignment, and evaluation outputs auditable.
+Key modules:
 
-```
-config.py          Every tunable parameter (feeds, keywords, thresholds, weights)
-scraper.py         RSS fetch, relevance filter, keyword classifier
-sentiment_llm.py   gpt-5-mini scorer — sentiment + category + graded relevance
-sentiment.py       XLM-RoBERTa offline fallback backend
-pipeline.py        Step orchestration + the aggregation math
-trading_calendar.py  signal_date: news → first session that can react
-events_bridge.py   Headline → event store (event-centric migration)
-kap_ingest.py      KAP Tier-A disclosure ingestion (MKK API)
-database.py        SQLite layer (schema, migrations, queries)
-visualize.py       3-panel matplotlib figure        dashboard.py   HTML dashboard
-evaluate.py        Read-only 6-layer quality audit
-benchmark_llm.py   Held-out model bake-off (OpenAI / Gemini)
-label_audit.py     Adjudication + intra-annotator consistency tools
-.github/workflows/daily.yml   Cloud daily run
-
-METHODOLOGY.md  every design decision    MIGRATION.md  event-pipeline migration plan
-LABELING.md     the labeling rubric      ROADMAP.md    what's done / next / frozen
-CLOUD.md        the cloud setup          DOCUMENTATION.md  full technical reference
+```text
+config.py                    Tunable feeds, thresholds, retry limits, and calendar data
+scraper.py                   Source-scoped observation collection and filter metadata
+sentiment_llm.py             Partial-result-aware gpt-5-mini scorer
+sentiment.py                 XLM-RoBERTa offline fallback
+database.py                  Additive schema, state transitions, exclusions, and audit queries
+pipeline.py                  Component orchestration and run outcomes
+trading_calendar.py          Timestamp normalization, timing buckets, and session assignment
+aggregation/signals.py       Pure four-variant aggregation formulas
+analysis/prediction/sensitivity.py  Equal-footing variant report
+analysis/polarization/inference.py  Dependence-aware selection/framing report
+scripts/demo.py               Deterministic API-key-free public demo
+visualize.py / dashboard.py  Session-baseline research outputs
+evaluate.py                  Read-only quality and exploratory signal audit
+events_bridge.py             Headline-to-event research bridge
+kap_ingest.py                Disabled-by-default KAP integration
 ```
 
-**Tech stack:** `Python 3.10` · `SQLite` · `OpenAI API (gpt-5-mini)` · `XLM-RoBERTa (offline fallback)` · `pandas` · `yfinance` · `matplotlib` · `pytest` · `GitHub Actions`
+Documentation: [methodology](METHODOLOGY.md) | [technical reference](DOCUMENTATION.md) | [polarization methods](docs/POLARIZATION_METHODS.md) | [repository structure](docs/REPOSITORY_STRUCTURE.md) | [labeling rubric](LABELING.md) | [AI assistance](AI_ASSISTANCE.md) | [test-to-risk map](docs/TEST_RISK_MAP.md) | [event migration](MIGRATION.md) | [roadmap](ROADMAP.md)
 
----
-
-## Future Work
+## Future work
 
 - Expand annotation with multiple independent human annotators and formal inter-annotator agreement.
-- Move from headline-level scores to event-level sentiment, reducing duplicate coverage of the same news event.
-- Fine-tune and benchmark a Turkish finance-specific sentiment model.
-- Use time-aware validation and walk-forward evaluation as the market-history sample grows.
-- Compare the current aggregate signal with predictive models, including transformer-based approaches, while accounting for transaction costs and global-market controls.
-
----
+- Replace lexical framing candidates with verified repeated canonical events as event resolution matures.
+- Continue the event-centric migration without replacing the headline baseline until it wins pre-specified out-of-sample tests.
+- Use chronological walk-forward evaluation, costs, controls, and independent windows as the market-history sample grows.
+- Never choose a signal variant on the same sample used to evaluate it.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

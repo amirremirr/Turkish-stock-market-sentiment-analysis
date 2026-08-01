@@ -109,7 +109,7 @@ def _predict(scores: pd.Series, pos: float, neg: float) -> pd.Series:
         return "neutral"
     return scores.apply(_label)
 
-def _accuracy(df: pd.DataFrame, pos: float, neg: float) -> float:
+def _agreement(df: pd.DataFrame, pos: float, neg: float) -> float:
     pred = _predict(df["model_score"], pos, neg)
     return float((pred == df["human_label"]).mean())
 
@@ -117,12 +117,12 @@ def _accuracy(df: pd.DataFrame, pos: float, neg: float) -> float:
 # -- Threshold sweep -----------------------------------------------------------
 
 def _sweep(df: pd.DataFrame) -> tuple[float, float]:
-    """Return (optimal_symmetric_threshold, best_accuracy)."""
+    """Return (optimal_symmetric_threshold, best_rubric_agreement)."""
     best_acc    = 0.0
     best_thresh = SENTIMENT_POSITIVE_THRESHOLD
     for t_int in range(0, 51):          # 0.00 to 0.50 in 0.01 steps
         t   = round(t_int / 100, 2)
-        acc = _accuracy(df, pos=t, neg=-t)
+        acc = _agreement(df, pos=t, neg=-t)
         if acc > best_acc:
             best_acc    = acc
             best_thresh = t
@@ -155,7 +155,7 @@ def _print_confusion(df: pd.DataFrame, pos: float, neg: float) -> None:
           f"= {correct/len(df):.1%}")
 
 
-# -- Per-category accuracy -----------------------------------------------------
+# -- Per-category rubric agreement --------------------------------------------
 
 def _print_by_category(df: pd.DataFrame, pos: float, neg: float) -> None:
     if "category" not in df.columns:
@@ -181,10 +181,10 @@ def _print_by_category(df: pd.DataFrame, pos: float, neg: float) -> None:
             top_mistake = "—"
         rows.append((acc, cat, n, top_mistake))
 
-    rows.sort()   # worst accuracy first
+    rows.sort()   # worst rubric agreement first
 
     print()
-    print(f"  {'Category':<22}  {'N':>4}  {'Accuracy':>9}  {'Top mistake'}")
+    print(f"  {'Category':<22}  {'N':>4}  {'Agreement':>9}  {'Top mistake'}")
     print(f"  {'-'*22}  {'-'*4}  {'-'*9}  {'-'*20}")
     for acc, cat, n, mistake in rows:
         bar  = "█" * int(acc * 15) + "░" * (15 - int(acc * 15))
@@ -218,15 +218,15 @@ def _holdout_report(df: pd.DataFrame) -> dict:
 
     tuned_thresh, tune_acc = _sweep(tune_df)
     _row("Optimal threshold (tune set)", f"±{tuned_thresh:.2f}",
-         f"tune accuracy = {tune_acc:.1%}")
+         f"tune-set agreement = {tune_acc:.1%}")
 
-    test_acc_tuned   = _accuracy(test_df, pos=tuned_thresh, neg=-tuned_thresh)
-    test_acc_default = _accuracy(test_df,
+    test_acc_tuned   = _agreement(test_df, pos=tuned_thresh, neg=-tuned_thresh)
+    test_acc_default = _agreement(test_df,
                                  pos=SENTIMENT_POSITIVE_THRESHOLD,
                                  neg=SENTIMENT_NEGATIVE_THRESHOLD)
 
-    _row("Test accuracy (tuned threshold)",   f"{test_acc_tuned:.1%}")
-    _row("Test accuracy (current ±0.05)",     f"{test_acc_default:.1%}")
+    _row("Test rubric agreement (tuned threshold)", f"{test_acc_tuned:.1%}")
+    _row("Test rubric agreement (current ±0.05)",   f"{test_acc_default:.1%}")
 
     gap = tune_acc - test_acc_tuned
     _row("Overfitting gap (tune − test)", f"{gap:+.1%}", warn=(gap > 0.10))
@@ -237,7 +237,7 @@ def _holdout_report(df: pd.DataFrame) -> dict:
         _ok("Small gap — threshold generalizes well to held-out data.")
         if tuned_thresh != SENTIMENT_POSITIVE_THRESHOLD:
             _info(f"Consider updating SENTIMENT_POSITIVE_THRESHOLD = {tuned_thresh} "
-                  f"in config.py (test accuracy: {test_acc_tuned:.1%})")
+                  f"in config.py (test rubric agreement: {test_acc_tuned:.1%})")
     else:
         _info("Moderate gap — keep labeling before committing a threshold change.")
 
@@ -245,8 +245,8 @@ def _holdout_report(df: pd.DataFrame) -> dict:
         "tune_n":         len(tune_df),
         "test_n":         len(test_df),
         "tuned_threshold": float(tuned_thresh),
-        "tune_accuracy":   float(tune_acc),
-        "test_accuracy":   float(test_acc_tuned),
+        "tune_agreement":  float(tune_acc),
+        "test_agreement":  float(test_acc_tuned),
         "gap":             float(gap),
     }
 
@@ -307,7 +307,7 @@ def _tracker(search_dir: str = ".") -> None:
         counts = [dist.get(l, 0) for l in LABEL_ORDER]
         if max(counts) > 2 * min(c for c in counts if c > 0):
             _warn("Label distribution is imbalanced. "
-                  "Try to label equal numbers of pos/neu/neg for reliable accuracy estimates.")
+                  "Balance labels when estimating per-class rubric agreement.")
         else:
             _ok("Label distribution is reasonably balanced.")
 
@@ -376,10 +376,10 @@ def main() -> None:
     for target in [TARGET_300, TARGET_500]:
         print(f"  Target {target:<5}  {_progress_bar(n, target, n)}")
 
-    # -- Overall accuracy -----------------------------------------------------
-    _sub(f"Overall accuracy at threshold ±{pos_thresh:.2f}")
-    current_acc = _accuracy(labeled, pos_thresh, neg_thresh)
-    _row("Overall accuracy", f"{current_acc:.1%}",
+    # -- Overall rubric agreement ---------------------------------------------
+    _sub(f"Overall rubric agreement at threshold ±{pos_thresh:.2f}")
+    current_acc = _agreement(labeled, pos_thresh, neg_thresh)
+    _row("Overall rubric agreement", f"{current_acc:.1%}",
          f"({int(current_acc * n)}/{n} correct)")
 
     dist         = labeled["human_label"].value_counts()
@@ -412,15 +412,15 @@ def main() -> None:
     _sub("Threshold sweep (symmetric, 0.00 – 0.50 in 0.01 steps)")
     opt_thresh, opt_acc = _sweep(labeled)
     _row("Current threshold", f"±{pos_thresh:.2f}",
-         f"accuracy = {current_acc:.1%}")
+         f"rubric agreement = {current_acc:.1%}")
     _row("Optimal threshold", f"±{opt_thresh:.2f}",
-         f"accuracy = {opt_acc:.1%}")
+         f"rubric agreement = {opt_acc:.1%}")
 
     if opt_thresh == pos_thresh:
         _ok("Current threshold is already optimal for this label set.")
     else:
         delta = opt_acc - current_acc
-        _info(f"Changing to ±{opt_thresh:.2f} would change accuracy by {delta:+.1%}.")
+        _info(f"Changing to ±{opt_thresh:.2f} would change agreement by {delta:+.1%}.")
         if n < 200:
             _info("Collect ≥200 unique labels before committing a threshold change.")
 
@@ -428,8 +428,8 @@ def main() -> None:
     _sub("Confusion matrix  (actual rows × predicted columns)")
     _print_confusion(labeled, pos_thresh, neg_thresh)
 
-    # -- Per-category accuracy -------------------------------------------------
-    _sub("Per-category accuracy (worst first)")
+    # -- Per-category rubric agreement ----------------------------------------
+    _sub("Per-category rubric agreement (worst first)")
     _print_by_category(labeled, pos_thresh, neg_thresh)
 
     # -- Holdout split ---------------------------------------------------------
@@ -442,11 +442,11 @@ def main() -> None:
         "csv":                str(args.csv),
         "n_labels":           n,
         "threshold":          float(pos_thresh),
-        "overall_accuracy":   float(current_acc),
-        "baseline_accuracy":  float(majority_acc),
+        "overall_agreement":  float(current_acc),
+        "baseline_agreement": float(majority_acc),
         "improvement":        float(improvement),
         "optimal_threshold":  float(opt_thresh),
-        "optimal_accuracy":   float(opt_acc),
+        "optimal_agreement":  float(opt_acc),
         "holdout":            holdout_metrics,
     }
 

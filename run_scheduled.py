@@ -77,17 +77,14 @@ except Exception:
     pass  # config unavailable — continue anyway
 
 # ── Fix stale pipeline_runs records from previous crashes ─────────────────────
-# If a previous run crashed mid-way, it left status='running' in the DB.
+# If a previous run was interrupted mid-way, it left status='running' in the DB.
 # Fix it before starting so the audit layer shows accurate history.
 
 try:
     sys.path.insert(0, str(HERE))
     import database as db
-    with db._conn() as con:
-        stale = con.execute(
-            "UPDATE pipeline_runs SET status='crashed', finished_at=datetime('now') "
-            "WHERE status='running'"
-        ).rowcount
+    db.init_db()
+    stale = db.fail_interrupted_pipeline_runs()
     if stale:
         log(f"  Fixed {stale} stale 'running' pipeline record(s) from previous crash.")
 except Exception as exc:
@@ -144,7 +141,11 @@ def run(cmd: list, label: str) -> int:
             f.write(line)
         sys.stdout.write(line)
     proc.wait()
-    status = "OK" if proc.returncode == 0 else f"FAILED (exit={proc.returncode})"
+    status = (
+        "COMPLETED (inspect reported component status)"
+        if proc.returncode == 0
+        else f"FAILED (exit={proc.returncode})"
+    )
     log(f"  [{label}] {status}")
     log()
     return proc.returncode
@@ -154,6 +155,12 @@ def run(cmd: list, label: str) -> int:
 
 _prevent_sleep()
 pipeline_exit = run([PYTHON, "main.py", "run", "--no-show"], "1/3 pipeline")
+if pipeline_exit == 0:
+    try:
+        persisted_status = db.db_stats().get("last_run_final_status", "unknown")
+        log(f"  Persisted pipeline outcome: {str(persisted_status).upper()}")
+    except Exception as exc:
+        log(f"  Warning: could not read persisted pipeline outcome: {exc}")
 
 # ── Auto-recovery: if full pipeline failed, retry each step separately ────────
 # Each step is a fresh subprocess = fresh memory allocation.
@@ -176,13 +183,8 @@ if pipeline_exit != 0:
     if not failed:
         log("  Recovery: all steps OK.")
         pipeline_exit = 0
-        # Record the recovery in pipeline_runs — without this, a successfully
-        # recovered day stays in the audit trail as a crashed/error run.
-        try:
-            rec_id = db.log_run_start(model_name=None)
-            db.log_run_end(rec_id, status="recovered")
-        except Exception as exc:
-            log(f"  Warning: could not record recovery run: {exc}")
+        log("  The original structured run remains failed; individual recovery "
+            "commands are not relabelled as a synthetic successful full run.")
     else:
         log(f"  Recovery: these steps still failed: {failed}")
 
@@ -214,8 +216,8 @@ except Exception as exc:
 
 log("=" * 62)
 log(f"  Finished: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-log(f"  Pipeline: {'OK' if pipeline_exit == 0 else 'FAILED'}    "
-    f"Eval: {'OK' if eval_exit == 0 else 'FAILED'}")
+log(f"  Pipeline exit: {pipeline_exit} (see persisted outcome above)    "
+    f"Eval: {'COMPLETED' if eval_exit == 0 else 'FAILED'}")
 log("=" * 62)
 
 sys.exit(pipeline_exit)

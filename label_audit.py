@@ -12,9 +12,8 @@ disagreements <labeled.csv>
     human) right, or is it genuinely ambiguous?
 
 disagreements <reviewed.csv> --summary
-    Read the filled file back. Reports the TRUE error rate — some "model errors"
-    are the model being right and the human being inconsistent, which means real
-    accuracy is HIGHER than the raw agreement number.
+    Read the researcher's adjudications back. Reports how that single reviewer
+    resolved model/human mismatches; it is not an independent true-error rate.
 
 consistency-export <labeled.csv> [--n 50]
     Sample N already-labeled headlines, strip ALL labels (model + human), write
@@ -22,8 +21,8 @@ consistency-export <labeled.csv> [--n 50]
 
 consistency-check <original.csv> <relabel.csv>
     Join on id, report intra-annotator agreement = how often you agree with your
-    PAST self. That is the ceiling the scorer is graded against: if you only
-    agree with yourself 85% of the time, an 83% scorer is essentially maxed out.
+    PAST self. This is one indicator of rubric stability, not a formal upper
+    bound on scorer agreement or evidence of objective label truth.
 
 Usage
 -----
@@ -78,10 +77,10 @@ def cmd_disagreements(args: argparse.Namespace) -> None:
         print(f"    genuinely ambiguous           : {ambiguous}")
         print()
         print("  Interpretation:")
-        print(f"    - {model_right} of the {n} 'errors' weren't model errors — real")
-        print("      scorer accuracy is HIGHER than the raw agreement number.")
-        print(f"    - {ambiguous} ambiguous cases are the irreducible label-noise floor.")
-        print(f"    - {human_right} are genuine model errors worth a rubric/few-shot fix.")
+        print(f"    - The reviewer favored the model in {model_right} cases; this is")
+        print("      adjudicated rubric evidence, not independent ground truth.")
+        print(f"    - {ambiguous} cases remained ambiguous under this review.")
+        print(f"    - The reviewer favored the original human label in {human_right} cases.")
         return
 
     df["human_label"] = _norm(df["human_label"])
@@ -133,12 +132,13 @@ def cmd_consistency_check(args: argparse.Namespace) -> None:
         return
     agree = float((a.values == b.values).mean())
     print(f"  Intra-annotator agreement: {agree:.1%}  (n={len(a)})")
-    print(f"  => This is the practical ceiling for scorer accuracy on this task.")
+    print("  => This is a within-reviewer rubric-stability estimate, not a ceiling.")
     if agree < 0.85:
         print("     Below 85%: your own convention is noisy — tighten the rubric")
         print("     before chasing scorer gains.")
     else:
-        print("     >=85%: labels are stable; scorer headroom is real if it lags.")
+        print("     >=85%: this repeat sample is relatively stable; independent annotation")
+        print("     is still needed to assess generalizability and scorer headroom.")
     print()
     _confusion(a.reset_index(drop=True), b.reset_index(drop=True), "original", "re-label")
 

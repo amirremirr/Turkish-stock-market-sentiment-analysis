@@ -1,213 +1,164 @@
-# ROADMAP
-
-Ordered by impact. Each item has a clear done-when so you know when to move on.
+# Roadmap
 
----
+**Rebased:** 2026-08-01
 
-## Done (2026-06-12) — sentiment scorer switched to gpt-5-mini
+**Principle:** methodological transparency and simple baselines before added complexity.
 
-| # | What | Why |
-|---|------|-----|
-| ✓ | **Production scorer is now gpt-5-mini via OpenAI API** (`sentiment_llm.py`, `SENTIMENT_BACKEND="llm"`) | Benchmarked on the 198 human labels: 84.5% held-out accuracy with 30 few-shot examples vs 76.8% for XLM-R tuned in-sample. Gemini free tier tested too (77.3%) but capped at 20 req/day. See METHODOLOGY §12. |
-| ✓ | All 755 historical headlines re-scored with gpt-5-mini | One consistent scorer across history; pre-switch DB at `backups/pre_llm_rescore_2026-06-12.db` |
-| ✓ | XLM-R kept as offline fallback backend | `SENTIMENT_BACKEND="xlmr"` — no API dependency |
-| ✓ | `benchmark_llm.py` decision tool (OpenAI + Gemini providers) | Re-run any time labels grow |
+This roadmap separates the credibility-hardening stages from the longer event-centric migration. Nothing here implies a validated trading strategy.
 
-**Also done same day:** LLM **category classification + graded relevance** (METHODOLOGY §13).
-The daily scoring call now returns sentiment + category + relevance (0-1) together. Relevance
-multiplies the aggregation weight; rows under 0.25 are excluded from aggregates but never
-deleted (user decision: unvalidated judgments may downweight, not destroy). `other` category:
-18% → ~11%. Still possible later: LLM-extracted ticker mentions (KAP/company-level analysis),
-event detection, GPT-written daily mood summary on the dashboard.
+## Current status
 
-## Done (2026-06-11) — critical-review fixes
+| Area | Current implementation |
+|---|---|
+| Production scorer | `gpt-5-mini`, prompt `p3`; 83.3% held-out categorical agreement with the project rubric |
+| Missing output | Explicit pending/scored/retry/failed states; missing-only configurable retries; no missing-to-neutral substitution |
+| Preservation | Source-level raw audit, reversible versioned exclusions/restoration, guarded permanent purge API |
+| Aggregation | Session-aligned `simple_mean` baseline plus relevance, intensity/relevance, and full-weighted sensitivities |
+| Timing | Normalized Istanbul timestamp, explicit timing bucket, versioned holiday/half-day session assignment |
+| Prediction | Every market-linked consumer uses the session baseline and complete-price-series return alignment |
+| Run health | Final success/degraded/failed state, five component states, structured warnings/errors, market-cache freshness policy |
+| Automation | GitHub Actions weekday run with database snapshot on the data branch |
+| Prediction claim | Exploratory; no validated alpha, strategy, or walk-forward result |
+| Event migration | Headline aggregation primary; event dual-write enabled; KAP production access pending |
 
-| # | What | Why |
-|---|------|-----|
-| ✓ | **`next_return` misalignment fixed** | `shift(-1)` ran AFTER merge/filter in evaluate.py L5 and visualize.py — ~40% of "next-day" pairs actually spanned 2–15 days. Now computed on the consecutive price series before merging. All L5 stats before this fix were partly invalid. |
-| ✓ | **Cross-run duplicate prevention + cleanup** | NULL-url headlines (ntv_ekonomi) re-inserted every run (`NULL != NULL` in SQLite). 54 redundant rows deleted; `insert_headlines` now dedups by (normalized title[:80], published date) against the DB. Note: every ntv story had been triplicated. |
-| ✓ | **Reliable-day count corrected: 26 → 13** | Half the "reliable" (≥3 headline) days were only above the gate because of duplicate rows. Honest gate ETA: ~17 more trading days. |
-| ✓ | **kap_bildirimler removed** | URL 404s — KAP's redesigned site serves no RSS. Feed contributed 0 headlines ever. KAP-style keywords stay in the relevance filter. |
-| ✓ | **Confidence-weight floor (0.10)** | Score-0 headlines had zero weight, so one strong headline could define a 10-neutral day. `SENTIMENT_CONFIDENCE_FLOOR` in config.py; METHODOLOGY §4 updated. |
-| ✓ | **Per-category weighting unified** (was M2) | `category_daily_sentiment` now uses the same confidence + time weighting as the daily score. |
-| ✓ | **`relabel` command** (enables M3) | Recomputes labels from stored probabilities with current thresholds — no re-inference. Threshold changes no longer leave mixed-regime labels. |
-| ✓ | **Recovery runs recorded** | Successful step-by-step recovery now writes a `status='recovered'` row to pipeline_runs instead of leaving the day marked crashed. |
-| ✓ | **Granger double-shift fixed** | Test ran on `next_return` while statsmodels applies its own lags (testing a 2-day lead by accident). Now uses same-day return. |
-| ✓ | **Loud failure on unknown model labels** | `_extract_score` raised-on-empty instead of silently scoring 0.0/neutral after a model swap. |
-| ✓ | `ECONOMIC_CALENDAR` comment honesty | Config claimed chart overlay/event tables; nothing reads it yet. Comment now says so. |
+Data reference points: the checked-in local DB extends through 2026-07-07 and the latest known `origin/data` snapshot is dated 2026-07-28. Counts are omitted because the automated snapshot changes.
 
-## Done (2026-06-10)
+Additive schema initialization does not silently re-score data, rebuild aggregate tables, or regenerate historic findings/figures. Those changes require an explicit command, and result-changing reruns must be documented.
 
-| # | What | Why |
-|---|------|-----|
-| ✓ | `other` category 24% → 18.6% | Added keywords (THY, holding, iflas, küresel piyasalar, LNG, fındık…); added `RELEVANCE_HARD_BLOCKLIST` (piyango, baraj doluluk, dunya kupas, futbol transfer, konser) |
-| ✓ | Crash recovery now includes scrape step | Previously recovery retried score/aggregate/prices on stale headlines if scrape was what crashed |
-| ✓ | HF offline guard | `HF_HUB_OFFLINE=1` now only set if model cache exists; fresh install no longer fails silently |
-| ✓ | BIST holiday skip | `run_scheduled.py` exits early on dates in `BIST_HOLIDAYS` (was running on closed-market days) |
-| ✓ | `executemany` rowcount fix | SQLite returns `-1` for `cur.rowcount` after `executemany`; replaced with `total_changes()` delta — inserted count in logs is now accurate |
-| ✓ | `statsmodels` in requirements.txt | Granger causality test in evaluate.py L5 was silently unavailable on fresh installs |
+## Stage 1 - Terminology and documentation - completed
 
----
+Completed 2026-08-01:
 
-## Signal exploration findings (2026-07-07, `explore_signal.py`)
+- separated measurement quality, media framing/polarization, and exploratory return prediction;
+- replaced confidence language for LLM intensity with model-reported intensity and documented synthetic compatibility components;
+- scoped headline metrics as categorical agreement with the project's human-label rubric;
+- defined 30 observations as an exploratory reporting gate, not a reliability threshold;
+- published current technical/methodological references, AI assistance disclosure, dated-artifact policy, and test-to-risk map;
+- kept unresolved behavior visible instead of describing intentions as implementation.
 
-At ~30 overlap days (underpowered; min detectable |r| ≈ 0.5), a disciplined,
-FDR-corrected sweep of targets and aggregations found:
-- **No target shows a signal**; direction, volatility, and FX are all ~zero.
-- **The FX "p=0.05" was a false positive** — killed by FDR correction (q=0.43).
-- **Aggregation choice does not matter** — mean, confidence-weighted, intensity,
-  shock-count, net-direction all ~zero vs next return. Rules out "bad averaging"
-  as the reason for the null.
-- **One lead to watch as data grows:** abnormal return vs EM (r≈+0.26, sensible
-  sign — good news → Turkey outperforms EM). NOT significant (p=0.20), does not
-  survive correction. Re-check at 60+ days. Do not report as a finding.
+## Stage 2 - Processing integrity and raw-data preservation - completed
 
----
+Completed 2026-08-01:
 
-## Standing rule — aggregation weights are FROZEN (2026-06-12)
+### Missing scorer output
 
-The confidence floor (0.10), time-of-day multipliers (1.5×/1.0×/0.8×), and
-relevance cutoff (0.25) are unvalidated hyperparameters justified by narrative.
-**Do not adjust them** until there are ≥45 reliable overlap days, then run a
-proper ablation: chronological train/test split, each weight toggled on/off,
-judged by held-out r and hit rate — not by whether the chart looks smoother.
-Tuning them earlier is overfitting with extra steps.
+- added `pending`, `scored`, `retry_pending`, and `failed` headline states;
+- preserved NULL sentiment fields when no valid result exists;
+- made partial-result IDs explicit and invalidated duplicate/out-of-range results;
+- added configurable missing-only retries and separate configurable HTTP retry/backoff;
+- stored attempt count, attempt timestamp, last error, and backend component kind;
+- admitted neutral only when the scorer explicitly returned neutral;
+- restricted aggregation to complete eligible `scored` rows.
 
----
+### Reversible exclusions
 
-## Short-term (next 2 weeks)
+- added source-distinct `raw_headline_observations` before canonical deduplication;
+- changed scraper filter failures into persisted exclusion metadata;
+- added append-oriented `headline_exclusions` history with idempotent active exclusion and timestamped restoration;
+- reconciled low-LLM-relevance decisions by rule/version without restoring unrelated exclusions;
+- changed `clean` from deletion to reversible exclusion and added `restore-exclusion`;
+- guarded low-level permanent deletion behind `confirm=True`, with foreign-key protection for raw observations.
 
-### S1 — Labels sprint *(manual, highest-impact)*
+### Pipeline health
 
-The 76.8% accuracy figure is in-sample on the same 198 labels used to tune the ±0.05 thresholds. Until a holdout run passes, this number is optimistic.
+- added final `success`, `degraded`, and `failed` outcomes;
+- added scrape, scoring, aggregation, market-data, and audit component states;
+- stored structured warnings and errors;
+- distinguished partial source/factor failures from total ingestion failure;
+- distinguished fresh-cache degradation from stale/absent market-data failure.
 
-```bash
-python main.py export-labels --n 300        # exports labels_to_validate.csv
-# Open in Excel / Google Sheets
-# Fill human_label column: positive / neutral / negative
-python main.py validate-labels labels_to_validate.csv --save
-```
+Regression evidence and still-open branches are listed in [docs/TEST_RISK_MAP.md](docs/TEST_RISK_MAP.md). Completion means the core behavior is implemented and protected by focused tests; it is not a claim that every network/provider or migration-failure path has been simulated.
 
-**Done when:** ≥300 unique labels; `validate_labels.py` holdout report runs and shows:
-- holdout test accuracy ≥ 70%
-- overfitting gap (tune − test) ≤ 10%
+## Stage 3 - Baselines, timing, and predictive alignment - completed
 
-Do not re-tune `SENTIMENT_POSITIVE_THRESHOLD` / `SENTIMENT_NEGATIVE_THRESHOLD` using these labels and then report the accuracy on the same set.
+Completed 2026-08-01:
 
----
+### Signal variants
 
-### S2 — Temporal alignment (`signal_date`)
+`daily_signal_variants` now stores, per first-reactable market session:
 
-Current issue: a headline published at 17:00 Istanbul is grouped into calendar day *t*, but most of day *t*'s return has already been realized. L5 "same-day" correlation may be sentiment reacting to price, not leading it.
+1. `simple_mean` - primary unweighted baseline;
+2. `relevance_weighted`;
+3. `intensity_relevance_weighted`;
+4. `full_weighted` - legacy intensity/relevance/time behavior under current neutral source/category defaults.
 
-**What to do:**
+It also stores label counts/shares, unclassified count, population dispersion, source count, event count, and weighted denominators. Zero-weight variants remain NULL instead of falling back to the baseline.
 
-1. Add a `signal_date` field to the aggregation — map `(published_at, published_hour)` to the trading session the market hasn't priced yet:
-   - `published_hour < 10` (Istanbul) → `signal_date = published_at` (pre-market, before open)
-   - `10 ≤ published_hour ≤ 18` → `signal_date = published_at` (during session — arguable, flag separately)
-   - `published_hour > 18` or `NULL` → `signal_date = next_trading_day(published_at)`
-2. Store `signal_date` in `daily_sentiment` or compute it in L5.
-3. Re-run `aggregate` and regenerate the chart.
-4. In evaluate.py L5: report Pearson *r* for both calendar-date and signal-date alignment side by side so you can see whether the "lead" was an artifact.
+`python -m analysis.prediction.sensitivity` compares correlations, directional agreement, distributions, and exploratory next-session metrics for all variants. It reports no preferred variant.
 
-**Done when:** L5 primary stat uses `signal_date → return(t+1)`, not raw `published_at`.
+### Timing separation
 
----
+- added `published_timestamp`, `timing_bucket`, and `session_rule_version`;
+- normalized aware timestamps to Europe/Istanbul and treated naive timestamps as Istanbul-local;
+- separated pre-open, during-session, post-close, weekend/holiday, and unknown-time buckets;
+- encoded regular and half-day closes plus consecutive closures;
+- made the unweighted mean independent of time weighting;
+- retained the historical time multiplier only in the full-weighted sensitivity;
+- moved `visualize.py`, `dashboard.py`, `evaluate.py`, `explore_signal.py`, and `analyze_external.py` to the session baseline;
+- formed next-session targets on the complete ordered market series before joining sparse signals;
+- labeled calendar-date and legacy category tables descriptive/compatibility only.
 
-## Medium-term (next month)
+Focused tests cover formulas, timestamp boundaries and conversion, holidays and half-days, storage/versioning, consumer table use, and exact sparse-signal return alignment. Annual calendar maintenance and additional provider-zone fixtures remain ongoing operational risks, not reasons to revert the completed convention.
 
-### M1 — DB backup
+## Stage 4 - Inference, structure, and reproducibility - completed
 
-Single SQLite file with no backup. One corrupted write loses everything.
+Completed 2026-08-01. Implementation adds methods and reproducibility tooling;
+it does not retroactively replace or regenerate dated research findings.
 
-Add to `run_scheduled.py` after the pipeline completes:
+### Polarization inference
 
-```python
-import shutil
-backup_dir = HERE / "backups"
-backup_dir.mkdir(exist_ok=True)
-# Keep last 7 daily backups
-dst = backup_dir / f"finance_sentiment_{TODAY}.db"
-shutil.copy2(HERE / "finance_sentiment.db", dst)
-# Prune older than 7 days
-for old in sorted(backup_dir.glob("finance_sentiment_*.db"))[:-7]:
-    old.unlink()
-```
+- reports raw camp/outlet means, the raw gap, and pooled Cohen's *d*;
+- resamples publication dates and controls for topic and date;
+- reports outlet/date clustered sensitivities and attempts event clustering only with defensible repeated event identity;
+- separates coverage selection from event-held-fixed framing and labels lexical pairs unverified;
+- retains descriptive, non-causal language and explicit rank/few-cluster diagnostics.
 
-**Done when:** `backups/` directory has rolling 7-day copies; one-command restore possible.
+### Repository structure
 
----
+- moved corpus/prediction/polarization analysis and optional research fetchers into documented packages;
+- retained import-compatible root wrappers for established commands;
+- left interdependent production modules in place to avoid an aesthetic import rewrite.
 
-### ~~M2 — Per-category aggregation consistency~~ ✓ Done 2026-06-11
+The current incremental boundaries and compatibility-entry-point policy are documented in [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md).
 
-Per-category aggregates now use the same confidence + time weighting as the daily score.
+### Reproducible demonstration
 
----
+- `python -m scripts.demo` uses committed sample headlines, cached sentiment, prices, session assignment, and all four variants;
+- emits `signal_results.csv`, `audit.json`, and `signal_variants.png`;
+- is regression-tested without a key, network, model load, or private database.
 
-### M3 — Threshold from holdout only
+## Predictive decision rule
 
-Currently `SENTIMENT_POSITIVE_THRESHOLD = 0.05` was tuned on the full 198-label set. After S1 is done:
+No result becomes a finding merely because 30 observations are available. A predictive conclusion requires a pre-specified variant and target, chronological out-of-sample evaluation, controls, transaction costs, multiple-testing discipline, and enough independent evaluation windows to characterize uncertainty. A null result is acceptable. No parameter should be tuned after observing an appealing in-sample result.
 
-1. Run `validate_labels.py` holdout (60/40 split on ≥300 labels).
-2. The optimal threshold from the **tune set** (60%) is the only number you're allowed to set in `config.py`.
-3. Report the **test set** (40%) accuracy as the honest number everywhere.
-4. After changing thresholds, run `run.bat relabel` — it recomputes all stored labels from the saved probabilities (no re-inference needed).
+## Event-centric migration status
 
-**Done when:** Config comment says "tuned on tune set only; test-set accuracy = X%".
+The event workstream remains separate from the completed credibility stages:
 
----
+- experiment registry, feature flags, rolling backups, event schema, and headline-to-event dual-write exist;
+- KAP integration is built and dry-run validated against a historical development sample but remains disabled pending production access;
+- structured extraction, session windows, entity/cap weighting, abnormal-return feature store, walk-forward evaluation, and a final event-path cutover/null decision remain future work.
 
-## Long-term (2–3 months, needs data)
+See [MIGRATION.md](MIGRATION.md) for the phase gates and compatibility rules.
 
-### L1 — Walk-forward signal validation
+## Historical record (June-July 2026)
 
-Requires ~6 months of daily data (≥120 reliable overlap days). One-window Pearson *r* on 26–30 points is not statistically meaningful.
+The following work is retained for provenance and is not the current to-do list:
 
-**What to build:** Rolling 20-day train / 5-day test window over the full history. Report mean *r* and hit rate across all windows.
+- **2026-06-10/11:** parsing, relevance rules, category coverage, duplicate cleanup, aggregate freshness, return-shift, and Granger double-shift fixes;
+- **2026-06-12:** production scorer switched from XLM-RoBERTa to gpt-5-mini; historical headlines re-scored; intensity floor, relevance grading, initial `signal_date`, experiment registry, event schema, and dual-write added;
+- **2026-06-13:** canonical 300-label rubric and prompt `p3`; KAP integration built against the historical development sample but left disabled;
+- **2026-06-16:** GitHub Actions became the primary daily automation path;
+- **2026-06-19/24:** disagreement adjudication, intra-annotator consistency, active-learning export, and public methodology narrative;
+- **2026-06-25:** corpus description and market-factor context;
+- **2026-07-07:** exploratory target/aggregation sweep with FDR correction, polarization robustness work, and external-series analysis; the predictive sweep remained null and exploratory;
+- **2026-08-01:** Stages 1-4 completed: terminology, omission-aware state/retries, reversible observation preservation, component outcomes, session variants/alignment, dependence-aware polarization inference, incremental package cleanup, and the offline demo.
 
-**Done when:** Walk-forward mean hit rate > 52% with p < 0.05 over 6+ months, or the opposite (confirmed non-signal).
+## Maintenance
 
----
-
-### L2 — Naive strategy with transaction costs
-
-Before the current L5 naive strategy means anything, add a spread/slippage assumption (e.g. 0.1% per trade round-trip). Most apparent edge in daily-signal strategies disappears once you add realistic costs.
-
-**Done when:** L5 shows strategy return net of 0.1% per trade.
-
----
-
-### L3 — Category-level signal
-
-Once data is sufficient, break L5 down by `category_daily_sentiment`. The hypothesis is that `rates_tcmb` and `fx_lira` sentiment leads BIST returns more strongly than `energy_commodities` or `turkey_macro`.
-
----
-
-### L4 — Model upgrade path (needs ≥500 labels)
-
-If holdout accuracy stays below 77% after threshold tuning, consider:
-1. Benchmark 1–2 finance-specific or Turkish multilingual models from HuggingFace on the same label set.
-2. Fine-tune the XLM-RoBERTa head on Turkish financial headlines (needs 500+ labels; even 300 may be enough for a calibration layer on top of `model_score`).
-
-**Do not start this until S1 is done.**
-
----
-
-## Maintenance (yearly)
-
-- **BIST_HOLIDAYS** in `config.py`: update each January from [KAP market calendar](https://www.kap.org.tr).
-- **ECONOMIC_CALENDAR** in `config.py`: update TCMB PPK and TÜİK TÜFE dates each January.
-- **RSS feed health**: run `python discover_sources.py --url <feed>` on all feeds if headlines drop unexpectedly.
-- **`RELEVANCE_HARD_BLOCKLIST`**: add terms when new social-content noise patterns appear from `sozcu_gundem` or `aa_politika`.
-
----
-
-## Won't do (and why)
-
-| Item | Reason |
-|------|--------|
-| Multiple-testing corrections (Bonferroni etc.) | Overkill at current sample size; address if/when publishing |
-| SSL certificate allowlist hardening | Personal scraper on trusted home network; acceptable risk |
-| Fine-tuning before 500+ labels | Not enough data to outperform zero-shot baseline reliably |
-| Migrate off SQLite | No concurrent writers; SQLite is appropriate for this scale |
-| Windows portability (ctypes sleep prevention) | Project is intentionally Windows-only (Task Scheduler) |
+- update full-holiday and half-day data from an authoritative Borsa Istanbul calendar before each year;
+- review RSS health and source definitions when collection volume changes;
+- preserve scorer/prompt/experiment provenance across any re-score;
+- run aggregation explicitly after intended eligibility/calendar changes;
+- keep research snapshots dated and never silently overwrite their sample interpretation;
+- update [docs/TEST_RISK_MAP.md](docs/TEST_RISK_MAP.md) whenever a behavioral risk gains or loses coverage.

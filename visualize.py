@@ -2,9 +2,9 @@
 Visualisation module — generates a three-panel figure:
 
   Panel 1  BIST 100 closing price (line)
-  Panel 2  Daily sentiment score  (bar chart, coloured red/green)
+  Panel 2  Session-aligned unweighted sentiment baseline (red/green bars)
            + 5-day rolling average (dashed line)
-  Panel 3  Scatter: today's sentiment vs next-day BIST 100 return
+  Panel 3  Scatter: session sentiment vs subsequent-session BIST 100 return
            + OLS regression line + Pearson r annotation
 
 Saves to PNG and optionally opens the interactive window.
@@ -48,25 +48,32 @@ def _load_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Returns (prices_df, sentiment_df, merged_df).
-    All date columns are parsed as datetime.date objects.
-    merged_df has columns: date, close, daily_return, avg_score, next_return.
+
+    ``sentiment_df`` is keyed to the first market session able to react. Its
+    unweighted ``simple_mean`` is exposed locally as ``avg_score`` only to keep
+    the plotting code and its public return shape compatible. There is
+    deliberately no fallback to the publication-date ``daily_sentiment``
+    table in this market-linked view.
     """
     start = (date.today() - timedelta(days=days)).isoformat()
 
     prices = db.get_prices(start=start, db_path=db_path)
-    sent   = db.get_daily_sentiment(start=start, db_path=db_path)
+    sent = db.get_signal_variants(start=start, db_path=db_path)
 
     if prices.empty or sent.empty:
         return prices, sent, pd.DataFrame()
 
+    prices = prices.copy()
+    sent = sent.copy().rename(columns={"simple_mean": "avg_score"})
     prices["date"] = pd.to_datetime(prices["date"])
-    sent["date"]   = pd.to_datetime(sent["date"])
+    sent["date"] = pd.to_datetime(sent["date"])
 
     # next_return must be computed on the consecutive price series BEFORE the
     # merge: shifting after an inner join pairs a day with the next surviving
     # row, which is not the next trading day whenever the overlap has gaps.
     prices = prices.sort_values("date")
-    prices["next_return"] = prices["daily_return"].shift(-1)  # true t+1 return
+    close_to_close = prices["close"].pct_change(fill_method=None) * 100.0
+    prices["next_return"] = close_to_close.shift(-1)
 
     merged = pd.merge(prices, sent, on="date", how="inner").sort_values("date")
 
@@ -101,7 +108,7 @@ def plot_sentiment_vs_price(
         )
         return None
 
-    # Reliable days only for scatter/rolling: same gate as evaluate.py L5.
+    # Eligible observations only for exploratory scatter/rolling panels.
     # Thin days (< MINIMUM_HEADLINES_PER_DAY) stay in panels 1 & 2 (hatched)
     # but are excluded from OLS and rolling correlation to avoid noisy points.
     reliable_merged = merged[merged["headline_count"] >= MINIMUM_HEADLINES_PER_DAY]
@@ -113,12 +120,12 @@ def plot_sentiment_vs_price(
         )
 
     # Soft gate: flag low-overlap windows but still render panels 1 & 2.
-    # Scatter / rolling correlation panels will show a PRELIMINARY watermark.
+    # Scatter / rolling panels show an exploratory watermark below the gate.
     insufficient = len(reliable_merged) < MINIMUM_OVERLAP_DAYS
     if insufficient:
         logger.warning(
-            "Only %d reliable overlapping days (need %d for reliable signal stats). "
-            "Scatter and rolling-correlation panels are marked PRELIMINARY.",
+            "Only %d eligible overlapping observations (display gate: %d). "
+            "Exploratory panels are marked PRELIMINARY.",
             len(reliable_merged), MINIMUM_OVERLAP_DAYS,
         )
 
@@ -135,9 +142,6 @@ def plot_sentiment_vs_price(
     ax_sent    = fig.add_subplot(gs[1, :])    # full-width middle
     ax_scatter = fig.add_subplot(gs[2, 0])    # bottom-left
     ax_roll    = fig.add_subplot(gs[2, 1])    # bottom-right
-
-    dates = np.array(prices["date"].dt.to_pydatetime())
-    sent_dates = np.array(sent["date"].dt.to_pydatetime())
 
     # ── Panel 1: BIST 100 price ───────────────────────────────────────────────
     ax_price.plot(
@@ -162,7 +166,7 @@ def plot_sentiment_vs_price(
     colors = [_C_POS if s >= 0 else _C_NEG for s in scores]
     bar_width = max(0.6, 0.8 * (days / 90))
 
-    # Separate reliable days from thin days (headline_count < threshold)
+    # Separate eligible observations from thin ones (headline_count < threshold)
     thin_mask    = sent["headline_count"] < MINIMUM_HEADLINES_PER_DAY
     reliable_sent = sent[~thin_mask]
     thin_sent     = sent[thin_mask]
@@ -171,7 +175,7 @@ def plot_sentiment_vs_price(
 
     ax_sent.bar(reliable_sent["date"], reliable_sent["avg_score"],
                 color=reliable_colors, width=bar_width, alpha=0.85,
-                label="Günlük ortalama duygu skoru")
+                label="Seans hizalı ağırlıksız duygu tabanı")
     if not thin_sent.empty:
         ax_sent.bar(thin_sent["date"], thin_sent["avg_score"],
                     color=thin_colors, width=bar_width, alpha=0.45,
@@ -188,7 +192,11 @@ def plot_sentiment_vs_price(
         )
 
     ax_sent.axhline(0, color="white", linewidth=0.8, linestyle="-", alpha=0.5)
-    ax_sent.set_title("Günlük Duygu Skoru  (XLM-RoBERTa)", fontsize=13, fontweight="bold")
+    ax_sent.set_title(
+        "Seans Hizalı Ağırlıksız Duygu Tabanı",
+        fontsize=13,
+        fontweight="bold",
+    )
     ax_sent.set_ylabel("Skor  [−1 … +1]")
     ax_sent.set_ylim(-1.05, 1.05)
     ax_sent.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
@@ -207,8 +215,8 @@ def plot_sentiment_vs_price(
                 ha="center", fontsize=6, color="white", alpha=0.7,
             )
 
-    # ── Panel 3a: Scatter sentiment → next-day return ─────────────────────────
-    # Uses reliable_merged only (thin days excluded — same gate as evaluate.py L5)
+    # ── Panel 3a: Scatter sentiment → subsequent-session return ───────────────
+    # Uses eligible observations only; thin observations are excluded.
     valid = reliable_merged.dropna(subset=["avg_score", "next_return"])
 
     if len(valid) >= 5:
@@ -241,16 +249,20 @@ def plot_sentiment_vs_price(
         ax_scatter.text(0.5, 0.5, "Yeterli veri yok", transform=ax_scatter.transAxes,
                         ha="center", va="center")
 
-    ax_scatter.set_xlabel("Duygu Skoru (t)")
-    ax_scatter.set_ylabel("BIST 100 Getirisi % (t+1)")
-    ax_scatter.set_title("Duygu → Ertesi Gün Getiri", fontsize=11, fontweight="bold")
+    ax_scatter.set_xlabel("Seans hizalı ağırlıksız duygu (t)")
+    ax_scatter.set_ylabel("BIST 100 sonraki seans getirisi % (t+1)")
+    ax_scatter.set_title(
+        "Keşifsel Sonraki-Seans Getirisi",
+        fontsize=11,
+        fontweight="bold",
+    )
     ax_scatter.axhline(0, color="grey", linewidth=0.6, linestyle="--")
     ax_scatter.axvline(0, color="grey", linewidth=0.6, linestyle="--")
 
     if insufficient:
         ax_scatter.text(
             0.5, 0.5,
-            f"PRELIMINARY\n{len(reliable_merged)} gün  (min {MINIMUM_OVERLAP_DAYS} gerekli)",
+            f"KEŞİFSEL\n{len(reliable_merged)} gözlem  (gösterim eşiği {MINIMUM_OVERLAP_DAYS})",
             transform=ax_scatter.transAxes,
             ha="center", va="center", fontsize=11, color="red", alpha=0.55,
             rotation=15,
@@ -258,7 +270,7 @@ def plot_sentiment_vs_price(
         )
 
     # ── Panel 3b: Rolling 30-day correlation ─────────────────────────────────
-    # Also uses reliable_merged only — consistent with scatter panel and evaluate.py L5
+    # Uses the same eligible observations as the exploratory scatter panel.
     if len(valid) >= 15:
         roll_window = min(30, len(valid))
         roll_corr = (
@@ -296,7 +308,7 @@ def plot_sentiment_vs_price(
     if insufficient:
         ax_roll.text(
             0.5, 0.5,
-            f"PRELIMINARY\n{len(reliable_merged)} gün  (min {MINIMUM_OVERLAP_DAYS} gerekli)",
+            f"KEŞİFSEL\n{len(reliable_merged)} gözlem  (gösterim eşiği {MINIMUM_OVERLAP_DAYS})",
             transform=ax_roll.transAxes,
             ha="center", va="center", fontsize=11, color="red", alpha=0.55,
             rotation=15,
@@ -309,7 +321,7 @@ def plot_sentiment_vs_price(
         f"{sent['date'].max().strftime('%d %b %Y')}"
     )
     fig.suptitle(
-        f"BIST 100 Piyasa Duygu Analizi\n{data_range}",
+        f"BIST 100 Seans Hizalı Duygu Analizi (keşifsel)\n{data_range}",
         fontsize=15, fontweight="bold", y=0.98,
     )
 

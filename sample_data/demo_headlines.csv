@@ -1,0 +1,11 @@
+observation_id,title,source,published_timestamp,published_date,category,event_id,processing_status,sentiment_score,sentiment_label,p_positive,p_neutral,p_negative,relevance,is_excluded,exclusion_reason,model_name
+demo-001,Merkez Bankası rezervlerinde artış açıklandı,Ekonomi Gazetesi,2026-06-08T09:15:00+03:00,2026-06-08,macro,evt-reserves,scored,0.65,positive,0.78,0.17,0.05,0.90,false,,cached-demo-v1
+demo-002,BIST 100 güne yatay başladı,Piyasa Haber,2026-06-08T11:40:00+03:00,2026-06-08,market,evt-open,scored,0.00,neutral,0.18,0.64,0.18,0.80,false,,cached-demo-v1
+demo-003,Spor kulübü hazırlık maçını kazandı,Günlük Haber,2026-06-08T12:00:00+03:00,2026-06-08,other,evt-sport,scored,0.30,positive,0.60,0.30,0.10,0.10,true,low_relevance,cached-demo-v1
+demo-004,Şirket bilanço toplantısı ertelendi,Finans Ajansı,2026-06-08T19:30:00+03:00,2026-06-08,company,evt-results,retry_pending,,,,,,,false,,
+demo-005,İhracat verisi beklentinin altında kaldı,Ekonomi Gazetesi,2026-06-08T20:15:00+03:00,2026-06-08,macro,evt-exports,scored,-0.55,negative,0.08,0.19,0.73,0.95,false,,cached-demo-v1
+demo-006,Banka haberi için model yanıtı alınamadı,Piyasa Haber,2026-06-09T11:30:00+03:00,2026-06-09,company,evt-bank,failed,,,,,,,false,,
+demo-007,Sanayi üretiminde toparlanma sinyali,Finans Ajansı,2026-06-13T14:00:00+03:00,2026-06-13,macro,evt-industry,scored,0.45,positive,0.68,0.24,0.08,0.85,false,,cached-demo-v1
+demo-008,Politika faizi sabit tutuldu,Ekonomi Gazetesi,,2026-06-10,macro,evt-rate,scored,0.00,neutral,0.15,0.70,0.15,0.70,false,,cached-demo-v1
+demo-009,Endeks gün içinde satış baskısı gördü,Piyasa Haber,2026-06-10T15:00:00+03:00,2026-06-10,market,evt-selloff,scored,-0.35,negative,0.11,0.25,0.64,0.88,false,,cached-demo-v1
+demo-010,Şirket yeni yatırım programını duyurdu,Finans Ajansı,2026-06-10T19:00:00+03:00,2026-06-10,company,evt-investment,scored,0.25,positive,0.56,0.36,0.08,0.65,false,,cached-demo-v1

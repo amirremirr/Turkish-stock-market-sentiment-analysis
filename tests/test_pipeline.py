@@ -413,7 +413,7 @@ class TestAggregation:
         db.batch_update_sentiment(updates, db_path=tmp_db)
 
     def test_mean_is_correct(self, tmp_db):
-        # avg_score is now confidence-weighted (weight = |score|) with time-of-day
+        # avg_score is sentiment-intensity-weighted (weight = |score|) with time-of-day
         # weighting (no published_hour -> time_weight = 1.0 for all).
         # Expected: np.average([0.5, -0.3, 0.1], weights=[0.5, 0.3, 0.1])
         #         = (0.25 - 0.09 + 0.01) / 0.9 ≈ 0.1889
@@ -715,7 +715,20 @@ class TestVisualize:
              "bull_bear_ratio": 0.75 if d[2] > 0 else 0.25}
             for d in days
         ]
-        db.upsert_daily_sentiment(sent_rows, db_path=tmp_db)
+        db.upsert_signal_variants([
+            {
+                "signal_date": row["date"],
+                "simple_mean": row["avg_score"],
+                "relevance_weighted": row["avg_score"],
+                "intensity_relevance_weighted": row["avg_score"],
+                "full_weighted": row["avg_score"],
+                "headline_count": row["headline_count"],
+                "positive_count": row["positive_count"],
+                "negative_count": row["negative_count"],
+                "neutral_count": row["neutral_count"],
+            }
+            for row in sent_rows
+        ], db_path=tmp_db)
 
         out = str(tmp_path / "plot.png")
         result = plot_sentiment_vs_price(db_path=tmp_db, days=30,
@@ -756,7 +769,20 @@ class TestVisualize:
              "bull_bear_ratio": None}
             for d in days
         ]
-        db.upsert_daily_sentiment(sent_rows, db_path=tmp_db)
+        db.upsert_signal_variants([
+            {
+                "signal_date": row["date"],
+                "simple_mean": row["avg_score"],
+                "relevance_weighted": row["avg_score"],
+                "intensity_relevance_weighted": row["avg_score"],
+                "full_weighted": row["avg_score"],
+                "headline_count": row["headline_count"],
+                "positive_count": row["positive_count"],
+                "negative_count": row["negative_count"],
+                "neutral_count": row["neutral_count"],
+            }
+            for row in sent_rows
+        ], db_path=tmp_db)
 
         out = str(tmp_path / "plot_prelim.png")
         result = plot_sentiment_vs_price(db_path=tmp_db, days=30,
@@ -772,7 +798,7 @@ class TestVisualize:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestLLMScorerContract:
-    """_to_tuple must keep label, score, and pseudo-probs mutually consistent."""
+    """_to_tuple keeps label, score, and synthetic components consistent."""
 
     def test_positive_label_clears_threshold(self):
         from sentiment_llm import _to_tuple
@@ -817,7 +843,7 @@ class TestLLMScorerContract:
 class TestSignalDate:
     """signal_date = first trading session that can react to the headline."""
 
-    def test_premarket_weekday_stays_same_day(self):
+    def test_premarket_weekday_uses_next_session(self):
         from trading_calendar import signal_date
         # 2026-06-10 is a Wednesday
         assert signal_date("2026-06-10", 8) == "2026-06-10"

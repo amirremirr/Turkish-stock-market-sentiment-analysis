@@ -102,6 +102,11 @@ CRAWL_DELAY    = 1.5        # seconds between requests (be polite)
 # Set RELEVANCE_FILTER_ENABLED = False to disable both tiers.
 RELEVANCE_FILTER_ENABLED = True
 
+# Version stamps make automatic exclusions reproducible. Bump the relevant
+# value whenever its rule set or threshold changes; restored exclusions from an
+# older version will then be reconsidered without rewriting their history.
+KEYWORD_RELEVANCE_RULE_VERSION = "keyword-relevance-v1"
+
 # Strong Turkey-market anchors - presence of any one overrides the blocklist.
 # Political figures are included: their arrest/resignation/statement is always
 # BIST-relevant regardless of any incidental blocklist hit in the headline.
@@ -220,18 +225,29 @@ KAP_MAX_DETAILS_PER_RUN   = 30              # detail calls per run (throttle: 6/
 KAP_THROTTLE_SECONDS      = 11
 
 # -- Sentiment scoring backend --------------------------------------------------
-# "llm"  : OpenAI gpt-5-mini via API (sentiment_llm.py). Benchmarked 2026-06-12:
-#          84.5% accuracy on held-out human labels vs 76.8% for tuned XLM-R.
+# "llm"  : OpenAI gpt-5-mini via API (sentiment_llm.py). Production prompt p3
+#          reached 83.3% agreement with the project's held-out human-label rubric.
 #          Needs OPENAI_API_KEY in .env. Cost: ~half a cent per daily run.
 # "xlmr" : local XLM-RoBERTa (sentiment.py). Free, offline, no API dependency —
 #          kept as the fallback backend.
-# IMPORTANT: don't flip back and forth casually — mixing backends across the
-# history corrupts the signal analysis. If you switch, re-score everything:
-#   UPDATE headlines SET sentiment_score=NULL; then python main.py score
+# IMPORTANT: do not flip back and forth casually: mixed scorer versions change
+# the measurement definition. There is intentionally no ordinary bulk-rescore
+# command. Use a versioned database copy and a reviewed provenance-aware
+# migration that resets the complete scoring state, never a one-column UPDATE.
 SENTIMENT_BACKEND = "llm"
 
 LLM_SENTIMENT_MODEL      = "gpt-5-mini"
 LLM_SENTIMENT_BATCH_SIZE = 50     # headlines per API call
+# Maximum persisted attempts for one headline, including its first request.
+# Omitted items are retried by themselves; after this many attempts they move
+# to processing_status='failed' while all sentiment fields remain NULL.
+LLM_SCORING_MAX_ATTEMPTS = 3
+# Transport retries happen inside one scoring attempt and cover timeouts, rate
+# limits, and transient server errors. They do not increment per-item attempts.
+# The limit is total HTTP attempts (initial request included); 4 preserves the
+# scorer's pre-migration behavior.
+LLM_HTTP_RETRY_LIMIT = 4
+LLM_HTTP_RETRY_BACKOFF_SECONDS = 15
 
 # -- Sentiment model (XLM-R fallback backend) ------------------------------------
 SENTIMENT_MODEL = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
@@ -241,29 +257,34 @@ SENTIMENT_LABELS = ["negative", "neutral", "positive"]
 SENTIMENT_BATCH_SIZE = 1    # 1 headline at a time = minimal memory, avoids OOM crashes on wake
 SENTIMENT_MAX_LENGTH = 128   # tokens; headlines are short, 128 is plenty
 # Tuned thresholds from 198-headline human validation (2026-06-08).
-# Model argmax was 69.2% accurate; these thresholds give 76.8%.
+# Model argmax agreed with 69.2% of rubric labels; these thresholds give 76.8%.
 # Rule: score > HIGH -> positive | score < LOW -> negative | else -> neutral
 # The wide neutral band fixes the model's tendency to over-call negative on
 # routine financial language ("reserves fell", "forecast lowered").
 SENTIMENT_POSITIVE_THRESHOLD =  0.05
 SENTIMENT_NEGATIVE_THRESHOLD = -0.05
-# Floor for the confidence weight |score| used in daily aggregation.
+# Floor for the sentiment-intensity weight |score| used only by weighted
+# sensitivity variants; the primary simple_mean baseline is unweighted.
 # Without a floor, a perfectly neutral headline (score ~ 0) has ~zero weight,
-# so a day with ten neutrals and one +0.6 headline would aggregate to ~+0.6.
+# so a sensitivity variant with ten neutrals and one +0.6 headline would be ~+0.6.
 # A neutral headline IS information ("nothing happened") and should pull the
-# daily average toward 0. Floor 0.10 = a neutral counts 1/10 of a max-conviction
-# headline.
-SENTIMENT_CONFIDENCE_FLOOR = 0.10
-# LLM relevance grade (0.0-1.0, stored in headlines.relevance) multiplies the
-# aggregation weight, so barely-relevant headlines barely move the daily mood.
-# Rows BELOW this threshold are excluded from daily aggregates entirely (but
-# never deleted — the grade is auditable and the threshold is tunable).
+# weighted value toward 0. Floor 0.10 gives a neutral one tenth the intensity
+# weight of a maximum-intensity headline in those variants.
+SENTIMENT_INTENSITY_FLOOR = 0.10
+# Backward-compatible name for callers that imported the pre-audit constant.
+# This is sentiment intensity, not a calibrated measure of model confidence.
+SENTIMENT_CONFIDENCE_FLOOR = SENTIMENT_INTENSITY_FLOOR
+# LLM relevance grade (0.0-1.0, stored in headlines.relevance) is used by the
+# weighted sensitivity variants. Rows below this threshold receive a reversible
+# versioned exclusion (never deletion); an explicit manual restoration is honored
+# until a newly stored relevance judgment supersedes that override.
 # NULL relevance (ungraded rows) is treated as 1.0.
 # VALIDATED 2026-06-13 on 300 human relevance judgments: 90.7% agreement at
 # this cutoff (sweep showed 0.25-0.35 optimal). Errors are asymmetric in the
 # safe direction: only 1/300 relevant headlines excluded; the false-keeps are
 # graded low (avg 0.39) and thus already downweighted. See METHODOLOGY §13.
 RELEVANCE_MIN_FOR_AGGREGATION = 0.25
+LLM_RELEVANCE_RULE_VERSION = "llm-relevance-p3-cutoff-0.25"
 
 # -- Visualisation -------------------------------------------------------------
 PLOT_DAYS    = 90            # default window for the chart
@@ -271,12 +292,13 @@ PLOT_DPI     = 150
 PLOT_OUTPUT  = "sentiment_vs_bist100.png"
 
 # -- BIST official holiday calendar -------------------------------------------
-# Days when Borsa Istanbul is closed (no price data expected).
+# Full days when Borsa Istanbul is closed (no price data expected).
 # Used by evaluate.py L4 to distinguish "known holiday gap" from "unexpected gap".
 # Sources: KAP (Kamuyu Aydınlatma Platformu) annual market calendar.
 #
 # Format: "YYYY-MM-DD"  — add new years at the start of each year.
-# Recurring fixed-date holidays (approximate — exact dates vary for lunar ones):
+# Recurring fixed-date holidays (the versioned 2025-2026 entries below use the
+# published Borsa Istanbul calendar; lunar dates must be refreshed each year):
 #   Jan 1   Yılbaşı (New Year)
 #   Apr 23  Ulusal Egemenlik ve Çocuk Bayramı
 #   May 1   İşçi Bayramı
@@ -291,50 +313,59 @@ PLOT_OUTPUT  = "sentiment_vs_bist100.png"
 BIST_HOLIDAYS = [
     # 2026 -----------------------------------------------------------------------
     "2026-01-01",   # Yılbaşı
-    "2026-03-19",   # Ramazan Bayramı arife (half-day / full closure)
     "2026-03-20",   # Ramazan Bayramı 1. günü
     "2026-03-21",   # Ramazan Bayramı 2. günü  (weekend in 2026 — not a gap)
     "2026-03-22",   # Ramazan Bayramı 3. günü  (weekend in 2026 — not a gap)
     "2026-04-23",   # Ulusal Egemenlik ve Çocuk Bayramı
     "2026-05-01",   # İşçi Bayramı
     "2026-05-19",   # Atatürk'ü Anma, Gençlik ve Spor Bayramı
-    "2026-05-26",   # Kurban Bayramı arife
     "2026-05-27",   # Kurban Bayramı 1. günü
     "2026-05-28",   # Kurban Bayramı 2. günü
     "2026-05-29",   # Kurban Bayramı 3. günü
-    "2026-06-01",   # Kurban Bayramı 4. günü
+    "2026-05-30",   # Kurban Bayramı 4. günü  (weekend in 2026 — not a gap)
     "2026-07-15",   # Demokrasi ve Milli Birlik Günü
-    "2026-08-30",   # Zafer Bayramı  (Sunday — may be observed Mon Aug 31)
-    "2026-10-28",   # Cumhuriyet Bayramı arife (half-day)
+    "2026-08-30",   # Zafer Bayramı  (Sunday — not a weekday gap)
     "2026-10-29",   # Cumhuriyet Bayramı
     # 2025 -----------------------------------------------------------------------
     "2025-01-01",   # Yılbaşı
-    "2025-03-30",   # Ramazan Bayramı arife
-    "2025-03-31",   # Ramazan Bayramı 1. günü
-    "2025-04-01",   # Ramazan Bayramı 2. günü
-    "2025-04-02",   # Ramazan Bayramı 3. günü
+    "2025-03-30",   # Ramazan Bayramı 1. günü
+    "2025-03-31",   # Ramazan Bayramı 2. günü
+    "2025-04-01",   # Ramazan Bayramı 3. günü
     "2025-04-23",   # Ulusal Egemenlik ve Çocuk Bayramı
     "2025-05-01",   # İşçi Bayramı
     "2025-05-19",   # Atatürk'ü Anma, Gençlik ve Spor Bayramı
-    "2025-06-05",   # Kurban Bayramı arife
     "2025-06-06",   # Kurban Bayramı 1. günü
     "2025-06-07",   # Kurban Bayramı 2. günü
     "2025-06-08",   # Kurban Bayramı 3. günü
     "2025-06-09",   # Kurban Bayramı 4. günü
     "2025-07-15",   # Demokrasi ve Milli Birlik Günü
     "2025-08-30",   # Zafer Bayramı
-    "2025-10-28",   # Cumhuriyet Bayramı arife (half-day)
     "2025-10-29",   # Cumhuriyet Bayramı
 ]
 
+# Sessions with an official early close. These are trading days, not holidays.
+# Values are Europe/Istanbul local close times (HH:MM).
+BIST_HALF_DAYS = {
+    "2025-06-05": "13:00",
+    "2025-10-28": "13:00",
+    "2026-03-19": "13:00",
+    "2026-05-26": "13:00",
+    "2026-10-28": "13:00",
+}
+TRADING_CALENDAR_RULE_VERSION = "bist-official-calendar-2025-2026-v2"
+
 # -- Quality gates -------------------------------------------------------------
 # Minimum trading-day overlap (sentiment rows that have a matching price row)
-# required before signal statistics are shown as reliable.
-# Below this threshold, scatter/rolling panels carry a PRELIMINARY watermark.
+# required before exploratory signal statistics are displayed. This is a
+# reporting gate, not a reliability or validation threshold.
+# Below it, scatter/rolling panels carry a PRELIMINARY watermark.
 MINIMUM_OVERLAP_DAYS      = 30
-# Days whose scored headline count is below this are marked unreliable in the
-# sentiment bar chart (hatched bars) and excluded from signal stats.
+# Days below this headline count are marked thin in the sentiment chart and
+# excluded from exploratory signal statistics.
 MINIMUM_HEADLINES_PER_DAY = 3
+# A price download failure can use cached observations only while the latest
+# stored market date is this many calendar days old or newer.
+MARKET_DATA_STALE_AFTER_DAYS = 5
 
 # -- News categories -----------------------------------------------------------
 # Ordered list of (category_slug, [keywords...]).

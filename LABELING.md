@@ -1,15 +1,17 @@
 # Labeling Guide
 
-You are the ground truth. The model was benchmarked against *your* judgment
-(84.5%), and every future improvement is measured against these labels — so
-**consistency matters more than any individual "correct" answer**. Pick a
-convention, write it down, stick to it.
+These labels define the project's human-label rubric; they are not universal
+ground truth. Production prompt `p3` showed 83.3% categorical agreement on 270
+canonical labels held out from its 30 few-shot examples. Every future comparison
+must name the rubric, sample, and split—so **consistency matters more than any
+individual "correct" answer**. Pick a convention, write it down, and apply it
+consistently.
 
 ## Setup (5 minutes)
 
 ```powershell
-# Export 300 fresh headlines, skipping the 198 you already labeled:
-python main.py export-labels --n 300 --exclude "labels_to_validate - labels_to_validate.csv.csv"
+# Export fresh headlines, optionally excluding a prior labeled CSV:
+python main.py export-labels --n 300 --exclude labels_validated.csv
 ```
 
 Open `labels_to_validate.csv` in Excel / Google Sheets, then:
@@ -110,9 +112,9 @@ Beyond "does the model agree with me," three tools check whether the ground
 truth *itself* is trustworthy — run them when you want to improve the labeling
 systematically rather than just collect more of it.
 
-**1. Adjudicate disagreements** — recover the true error rate. Some "model
-errors" are the model being right and you having drifted; tagging them tells
-you real accuracy and surfaces rubric gaps.
+**1. Adjudicate disagreements** — characterize the observed mismatch rate. Some
+model-versus-human mismatches reflect annotator drift or genuine ambiguity;
+tagging them refines rubric-agreement estimates and surfaces rubric gaps.
 ```powershell
 python label_audit.py disagreements labels_validated_p3.csv   # -> disagreements_to_review.csv
 # fill the 'verdict' column: model | human | ambiguous, then:
@@ -137,12 +139,14 @@ python main.py export-labels --n 100 --uncertain --exclude labels_validated.csv
 ## When you're done
 
 ```powershell
-# Accuracy, confusion matrix, threshold sweep, holdout split:
+# Categorical rubric agreement, confusion matrix, threshold sweep, holdout split:
 python main.py validate-labels labels_to_validate.csv --save-report
 ```
 
-Then tell Claude — next steps from there: merge with the original 198 (~500
-total), measure relevance agreement against the LLM's 0.25 cutoff, refresh
-the few-shot examples from the richer pool, and re-benchmark the scorer.
-Later (migration Phase 4) a ~200-row subset gets a second pass with a
-continuous direction (−1..+1) annotation — don't worry about that now.
+Record the rubric version and review the report before changing a prompt or
+few-shot set. The original 198 labels use an older convention and remain a
+historical reference; do **not** silently merge them with the canonical 300-row
+set. Measure relevance agreement at the 0.25 cutoff separately. If examples or
+prompt rules change, bump the prompt version and evaluate on labels that were
+not used as examples. A later event-level study may add a separately specified
+continuous-direction annotation rather than retrofitting the three-class labels.

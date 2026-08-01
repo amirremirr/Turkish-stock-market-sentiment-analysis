@@ -8,12 +8,12 @@ Sections
 --------
   L0  System     - pipeline runs, derived-table freshness, schema completeness
   L1  Scraper    - coverage, date parsing, encoding, source diversity, categories
-  L2  Model      - score distribution, confidence, raw-probability completeness,
+  L2  Model      - score distribution, reported intensity, score-component completeness,
                    spot-check sample
-  L3  Aggregate  - signal thickness, volatility, category signal breakdown
+  L3  Aggregate  - session baseline thickness and weighting sensitivity
   L4  Prices     - gaps, outlier returns, staleness
-  L5  Signal     - Pearson r, hit rate, naive-strategy edge
-                   (gated: needs MINIMUM_OVERLAP_DAYS overlapping days)
+  L5  Signal     - exploratory session-baseline association and sensitivity
+                   (display-gated at MINIMUM_OVERLAP_DAYS observations)
 
 Usage
 -----
@@ -51,6 +51,47 @@ from config import (
 
 W = 62  # report width
 
+SIGNAL_VARIANTS = (
+    "simple_mean",
+    "relevance_weighted",
+    "intensity_relevance_weighted",
+    "full_weighted",
+)
+
+
+def _signal_variants_frame(db_path: str) -> pd.DataFrame:
+    """Load the session-assigned signal table through the database adapter.
+
+    The adapter currently returns a DataFrame; accepting row mappings as well
+    keeps the read-only helper simple to isolate in tests.  Historical
+    ``signal_date`` and ``session_date`` spellings are normalized to ``date``.
+    """
+    loaded = db.get_signal_variants(db_path=db_path)
+    if isinstance(loaded, pd.DataFrame):
+        frame = loaded.copy()
+    else:
+        frame = pd.DataFrame([dict(row) for row in loaded])
+    if frame.empty:
+        return pd.DataFrame(columns=("date", *SIGNAL_VARIANTS, "headline_count"))
+    date_column = next(
+        (name for name in ("date", "session_date", "signal_date") if name in frame.columns),
+        None,
+    )
+    if date_column is None:
+        raise ValueError("daily_signal_variants rows do not contain a session date")
+    if date_column != "date":
+        frame = frame.rename(columns={date_column: "date"})
+
+    required = {"date", "simple_mean", "headline_count"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(
+            "daily_signal_variants rows are missing required columns: "
+            + ", ".join(missing)
+        )
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.sort_values("date").reset_index(drop=True)
+
 def _hdr(title: str) -> None:
     print(f"\n{'=' * W}")
     print(f"  {title}")
@@ -85,13 +126,15 @@ def audit_system(db_path: str) -> dict:
                FROM pipeline_runs ORDER BY run_id DESC LIMIT 1"""
         ).fetchone()
 
-        # Freshness: latest scored headline vs latest daily_sentiment row
+        # The calendar aggregate is retained only as a legacy descriptive
+        # freshness reference.  Session-assigned variants are loaded below and
+        # are the primary aggregate used by every market-linked audit.
         hl_max   = con.execute(
             "SELECT MAX(published_at) FROM headlines WHERE sentiment_score IS NOT NULL"
         ).fetchone()[0]
         ds_max   = con.execute("SELECT MAX(date) FROM daily_sentiment").fetchone()[0]
 
-        # Schema completeness: how many scored rows are missing raw probabilities
+        # Schema completeness: scored rows missing backend-specific components.
         missing_probs = con.execute(
             """SELECT COUNT(*) FROM headlines
                WHERE sentiment_score IS NOT NULL AND p_positive IS NULL"""
@@ -105,6 +148,12 @@ def audit_system(db_path: str) -> dict:
             "SELECT COUNT(*) FROM headlines WHERE category IS NULL"
         ).fetchone()[0]
 
+    session_signals = _signal_variants_frame(db_path)
+    session_max = (
+        session_signals["date"].max().date().isoformat()
+        if not session_signals.empty else None
+    )
+
     # -- Pipeline run log -------------------------------------------------------
     _sub("Pipeline run log")
     _row("Total pipeline runs logged", run_count,
@@ -113,7 +162,16 @@ def audit_system(db_path: str) -> dict:
         _warn("No runs logged - use 'python main.py run' instead of individual steps")
     elif last_run:
         status = last_run["status"]
-        _row("Last run status",   status,  warn=(status == "error"))
+        canonical_status = {
+            "ok": "success",
+            "recovered": "success",
+            "error": "failed",
+            "crashed": "failed",
+        }.get(status, status)
+        _row(
+            "Last run status", canonical_status,
+            warn=(canonical_status != "success"),
+        )
         _row("Last run started",  (last_run["started_at"] or "")[:19])
         _row("Last run finished", (last_run["finished_at"] or "-")[:19])
         _row("Last run scraped",  last_run["headlines_scraped"] or 0)
@@ -122,35 +180,45 @@ def audit_system(db_path: str) -> dict:
             _row("Model used",    last_run["model_name"])
         if last_run["error_msg"]:
             _warn(f"Last run error: {last_run['error_msg']}")
-        elif status == "ok":
+        elif canonical_status == "success":
             _ok("Last run completed without errors")
+        elif canonical_status == "degraded":
+            _warn("Last run completed with degraded components; inspect its warnings")
+        elif canonical_status == "running":
+            _warn("Last run has not reached a terminal state")
 
     # -- Derived-table freshness -----------------------------------------------
-    _sub("Derived-table freshness")
-    if hl_max and ds_max:
-        if hl_max <= ds_max:
-            _ok(f"daily_sentiment is current  (latest: {ds_max})")
+    _sub("Derived-table freshness (session-assigned primary)")
+    if hl_max and session_max:
+        headline_date = pd.to_datetime(hl_max).date()
+        aggregate_date = pd.to_datetime(session_max).date()
+        if headline_date <= aggregate_date:
+            _ok(f"daily_signal_variants is current  (latest session: {session_max})")
         else:
-            _warn(f"daily_sentiment is STALE  "
-                  f"(scored headline: {hl_max}  >  aggregate: {ds_max})")
+            _warn(f"daily_signal_variants may be STALE  "
+                  f"(scored headline date: {headline_date}  >  "
+                  f"latest session: {session_max})")
             _info("Run 'python main.py aggregate' to refresh")
-    elif hl_max and not ds_max:
-        _warn("Scored headlines exist but daily_sentiment is empty")
+    elif hl_max and not session_max:
+        _warn("Scored headlines exist but daily_signal_variants is empty")
         _info("Run 'python main.py aggregate'")
     else:
         _info("No scored headlines yet")
 
+    if ds_max:
+        _info(f"Legacy calendar daily_sentiment latest date: {ds_max} (descriptive only)")
+
     # -- Schema completeness ---------------------------------------------------
-    _sub("Schema completeness (raw probabilities)")
+    _sub("Schema completeness (score components)")
     if total_scored == 0:
         _info("No scored headlines yet")
     elif missing_probs == 0:
-        _ok(f"All {total_scored} scored headlines have raw probability fields")
+        _ok(f"All {total_scored} scored headlines have score-component fields")
     else:
         pct = missing_probs / total_scored * 100
         _warn(f"{missing_probs} / {total_scored} ({pct:.0f}%) scored headlines "
               f"are missing p_positive/p_neutral/p_negative")
-        _info("These were scored before raw-probability storage was added.")
+        _info("These were scored before score-component storage was added.")
         _info("Re-score: DELETE sentiment cols, then 'python main.py score'")
 
     if cat_null > 0:
@@ -328,6 +396,7 @@ def audit_scraper(db_path: str) -> dict:
         st_match = next((s for s in RELEVANCE_STRONG   if s in t), None)
         if bl_match and st_match:
             edge_cases.append({
+                "id":            int(r["id"]),
                 "title":         r["title"],
                 "category":      r.get("category") or "?",
                 "blocklist_hit": bl_match,
@@ -339,10 +408,14 @@ def audit_scraper(db_path: str) -> dict:
     else:
         _warn(f"{len(edge_cases)} headline(s) passed because a strong marker "
               f"overrode a blocklist term:")
-        _info("Mark false-positives in the DB with: DELETE FROM headlines WHERE id=?")
+        _info(
+            "Preserve reviewed false positives with "
+            "database.exclude_headline(ID, 'manual_false_positive', "
+            "rule='blocklist_override_review'), then rerun aggregation."
+        )
         for ec in edge_cases[:12]:   # cap at 12 to keep output readable
             title_w = textwrap.shorten(ec["title"], width=52, placeholder="...")
-            print(f"    [{ec['category']:18}] "
+            print(f"    [id={ec['id']:<5} {ec['category']:18}] "
                   f"bl={ec['blocklist_hit']!r:12}  st={ec['strong_hit']!r:10}  "
                   f"{title_w}")
         if len(edge_cases) > 12:
@@ -414,16 +487,17 @@ def audit_model(db_path: str, spot_n: int = 10) -> dict:
     scores = df["sentiment_score"].values
     labels = df["sentiment_label"].values
 
-    # -- Raw probability completeness ------------------------------------------
-    _sub("Raw probability completeness")
+    # -- Score-component completeness ------------------------------------------
+    _sub("Score-component completeness")
     has_probs = df["p_positive"].notna().sum()
     pct_probs = has_probs / len(df) * 100
-    _row("Headlines with raw probabilities", has_probs, f"({pct_probs:.0f}%)",
+    _row("Headlines with score components", has_probs, f"({pct_probs:.0f}%)",
          warn=(pct_probs < 95))
     if pct_probs < 95:
         _warn("Some headlines lack p_positive/p_neutral/p_negative - scored before schema upgrade")
     else:
-        _ok("Raw probability fields are fully populated")
+        _ok("Score-component fields are fully populated")
+    _info("LLM p_* fields are synthetic compatibility values, not calibrated probabilities.")
 
     # Model version
     models_used = df["model_name"].dropna().unique()
@@ -434,7 +508,7 @@ def audit_model(db_path: str, spot_n: int = 10) -> dict:
         _info("Consider rescoring all headlines with one model for consistency")
 
     # -- Score distribution ----------------------------------------------------
-    _sub("Score distribution  (P(pos) - P(neg), range [-1,+1])")
+    _sub("Stored sentiment-score distribution  (range [-1,+1])")
     _row("Count scored",    len(scores))
     _row("Mean",            f"{scores.mean():+.4f}")
     _row("Median",          f"{np.median(scores):+.4f}")
@@ -445,14 +519,14 @@ def audit_model(db_path: str, spot_n: int = 10) -> dict:
     _row("10th / 25th / 50th / 75th / 90th",
          "  ".join(f"{p:+.2f}" for p in pcts))
 
-    # -- Confidence -----------------------------------------------------------
-    _sub("Model confidence")
+    # -- Model-reported sentiment intensity -----------------------------------
+    _sub("Model-reported sentiment intensity")
     near_zero = (np.abs(scores) < 0.05).sum()
     decisive  = (np.abs(scores) > 0.40).sum()
     _row("Scores near zero  |s| < 0.05", near_zero,
          warn=(near_zero / len(scores) > 0.5),
-         note="(model may be under-confident)")
-    _row("Decisive scores   |s| > 0.40", decisive,
+         note="(weak directional intensity)")
+    _row("High-intensity scores |s| > 0.40", decisive,
          f"({decisive/len(scores)*100:.0f}%)")
 
     if scores.std() < 0.05:
@@ -487,7 +561,7 @@ def audit_model(db_path: str, spot_n: int = 10) -> dict:
     print()
     _info("Manually check: does the label match your intuition for each headline?")
     _info("Key failure modes: negation ('dusmedi'), sarcasm, mixed-signal headlines")
-    _info("Long-term fix: label 300-1000 headlines and measure accuracy (item #5)")
+    _info("Track categorical agreement against the written human-label rubric.")
 
     return {"mean_score": float(scores.mean()), "std_score": float(scores.std())}
 
@@ -497,69 +571,84 @@ def audit_model(db_path: str, spot_n: int = 10) -> dict:
 # -----------------------------------------------------------------------------
 
 def audit_aggregate(db_path: str) -> dict:
-    _hdr("L3 - DAILY AGGREGATE QUALITY")
+    _hdr("L3 - SESSION-ASSIGNED SIGNAL AGGREGATE QUALITY")
 
-    with db._conn(db_path) as con:
-        df = pd.read_sql_query("SELECT * FROM daily_sentiment ORDER BY date", con)
+    df = _signal_variants_frame(db_path)
 
     if df.empty:
-        _warn("No aggregated data - run 'python main.py aggregate' first.")
+        _warn("No session-assigned signal variants - run 'python main.py aggregate' first.")
         return {}
 
-    df["date"] = pd.to_datetime(df["date"])
-
     # -- Signal thickness ------------------------------------------------------
-    _sub(f"Signal thickness (headlines per day, gate: {MINIMUM_HEADLINES_PER_DAY})")
+    _sub(f"Signal thickness (headlines per session, gate: {MINIMUM_HEADLINES_PER_DAY})")
     counts = df["headline_count"]
-    _row("Days of signal",            len(df))
-    _row("Articles/day  min/mean/max", f"{counts.min()} / {counts.mean():.1f} / {counts.max()}")
+    _row("Sessions with signal", len(df))
+    _row("Articles/session min/mean/max",
+         f"{counts.min()} / {counts.mean():.1f} / {counts.max()}")
 
     thin_days = df[df["headline_count"] < MINIMUM_HEADLINES_PER_DAY]
     if not thin_days.empty:
-        _warn(f"{len(thin_days)} day(s) with < {MINIMUM_HEADLINES_PER_DAY} headlines "
-              f"(signal unreliable; hatched in plot):")
+        _warn(f"{len(thin_days)} session(s) with < {MINIMUM_HEADLINES_PER_DAY} headlines "
+              f"(thin observations; excluded from exploratory statistics):")
         for _, r in thin_days.iterrows():
             print(f"    {r['date'].date()}  n={int(r['headline_count'])}  "
-                  f"score={r['avg_score']:+.3f}")
+                  f"simple_mean={r['simple_mean']:+.3f}")
     else:
-        _ok(f"All days meet the minimum of {MINIMUM_HEADLINES_PER_DAY} headlines")
+        _ok(f"All sessions meet the minimum of {MINIMUM_HEADLINES_PER_DAY} headlines")
 
-    # -- Signal volatility -----------------------------------------------------
-    _sub("Signal volatility")
-    _row("Avg score  mean", f"{df['avg_score'].mean():+.4f}")
-    _row("Avg score  std",  f"{df['avg_score'].std():.4f}")
-    _row("Avg score  min",  f"{df['avg_score'].min():+.4f}")
-    _row("Avg score  max",  f"{df['avg_score'].max():+.4f}")
+    # -- Primary baseline distribution ----------------------------------------
+    baseline = df["simple_mean"].dropna()
+    _sub("Primary baseline distribution (simple unweighted mean)")
+    _row("Simple mean  mean", f"{baseline.mean():+.4f}")
+    _row("Simple mean  std",  f"{baseline.std():.4f}")
+    _row("Simple mean  min",  f"{baseline.min():+.4f}")
+    _row("Simple mean  max",  f"{baseline.max():+.4f}")
 
-    if df["avg_score"].std() < 0.03:
-        _warn("Daily signal has very low variance - may not be informative")
+    if baseline.std() < 0.03:
+        _warn("Session baseline has very low variance - exploratory tests may be unstable")
     else:
-        _ok("Day-to-day signal variation looks meaningful")
+        _ok("Session baseline has non-trivial variation")
 
-    # -- Label consistency -----------------------------------------------------
-    _sub("Bull/Bear ratio vs avg score consistency")
-    _info("NOTE: avg_score uses confidence weighting (weight=|score|).")
-    _info("A single high-conf negative can outweigh several weak positives,")
-    _info("so some bull/bear disagreement is EXPECTED and by design.")
-    df["bbr"] = df["bull_bear_ratio"].fillna(0.5)
-    df["sign_match"] = (
-        ((df["avg_score"] > 0) & (df["bbr"] > 0.5)) |
-        ((df["avg_score"] < 0) & (df["bbr"] < 0.5)) |
-        (df["avg_score"] == 0)
-    )
-    match_pct = df["sign_match"].mean() * 100
-    _row("Days where avg_score & bull_bear agree", f"{match_pct:.0f}%",
-         warn=(match_pct < 55))
-    if match_pct < 55:
-        _warn("avg_score and bull_bear_ratio frequently disagree - check for extreme outlier scores")
-        _info("If one headline scores ±0.9 and dominates, review it manually")
-    elif match_pct < 70:
-        _info("Some disagreement is normal with confidence weighting active")
-    else:
-        _ok("avg_score and bull_bear_ratio are consistent")
+    # -- Weighting sensitivity -------------------------------------------------
+    _sub("Weighting sensitivity (alternatives are diagnostics, not selected models)")
+    for column in SIGNAL_VARIANTS[1:]:
+        if column not in df.columns:
+            _warn(f"Missing sensitivity variant: {column}")
+            continue
+        paired = df[["simple_mean", column]].dropna()
+        if paired.empty:
+            _info(f"{column}: no finite paired sessions")
+            continue
+        sign_agreement = (
+            np.sign(paired["simple_mean"]) == np.sign(paired[column])
+        ).mean()
+        mean_abs_delta = (paired[column] - paired["simple_mean"]).abs().mean()
+        _row(
+            column,
+            f"mean={paired[column].mean():+.4f}",
+            f"sign agreement={sign_agreement:.1%}; mean |delta|={mean_abs_delta:.4f}; "
+            f"n={len(paired)}",
+        )
+
+    # -- Label-share consistency ----------------------------------------------
+    if {"positive_share", "negative_share"}.issubset(df.columns):
+        _sub("Simple mean vs observed positive/negative shares")
+        directional = df.dropna(
+            subset=["simple_mean", "positive_share", "negative_share"]
+        ).copy()
+        directional["share_direction"] = (
+            directional["positive_share"] - directional["negative_share"]
+        )
+        match_pct = (
+            np.sign(directional["simple_mean"])
+            == np.sign(directional["share_direction"])
+        ).mean() * 100 if not directional.empty else float("nan")
+        _row("Sessions with matching direction", f"{match_pct:.0f}%",
+             warn=(not np.isnan(match_pct) and match_pct < 55))
+        _info("This is a descriptive consistency check, not a predictive result.")
 
     # -- Per-category signal ---------------------------------------------------
-    _sub("Per-category mean sentiment (category_daily_sentiment)")
+    _sub("Legacy calendar-date category aggregate (descriptive only)")
     with db._conn(db_path) as con:
         cat_df = pd.read_sql_query(
             """SELECT category,
@@ -751,68 +840,86 @@ def audit_prices(db_path: str) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# L5 - Signal quality (does sentiment predict returns?)
+# L5 - Exploratory signal/return association
 # -----------------------------------------------------------------------------
 
 def audit_signal(db_path: str) -> dict:
-    _hdr("L5 - SIGNAL QUALITY (Sentiment -> Return)")
+    _hdr("L5 - EXPLORATORY SESSION SIGNAL/RETURN ASSOCIATION")
 
     with db._conn(db_path) as con:
         prices = pd.read_sql_query(
             "SELECT date, close, daily_return FROM bist100_prices", con
         )
-        sent = pd.read_sql_query(
-            "SELECT date, avg_score, headline_count FROM daily_sentiment", con
-        )
+    signals = _signal_variants_frame(db_path)
 
-    if prices.empty or sent.empty:
-        _warn("Need both price and sentiment data. Run 'python main.py run' first.")
+    if prices.empty or signals.empty:
+        _warn("Need both prices and session-assigned signal variants. "
+              "Run 'python main.py run' first.")
         return {}
 
     prices["date"] = pd.to_datetime(prices["date"])
-    sent["date"]   = pd.to_datetime(sent["date"])
 
-    # next_return MUST be computed on the consecutive trading-day price series
+    # next_return MUST be computed on the consecutive exchange-session price series
     # BEFORE merging/filtering. shift(-1) after an inner join pairs a day with
     # the next SURVIVING ROW, which can be many trading days later when the
-    # overlap has gaps — silently corrupting every t→t+1 statistic below.
+    # overlap has gaps — silently corrupting every D→D+1-session statistic below.
     prices = prices.sort_values("date")
+    prices["daily_return"] = prices["close"].pct_change(fill_method=None) * 100.0
     prices["next_return"] = prices["daily_return"].shift(-1)
 
-    # Only include days that meet the minimum-headline gate
-    reliable_sent = sent[sent["headline_count"] >= MINIMUM_HEADLINES_PER_DAY]
-    excluded      = len(sent) - len(reliable_sent)
+    # Apply the coverage gate only after subsequent-session returns have been
+    # formed on the complete ordered exchange-session price series above.
+    reliable_signals = signals[
+        signals["headline_count"] >= MINIMUM_HEADLINES_PER_DAY
+    ]
+    excluded = len(signals) - len(reliable_signals)
     if excluded:
-        _info(f"Excluding {excluded} day(s) with < {MINIMUM_HEADLINES_PER_DAY} headlines "
-              f"from signal stats")
+        _info(f"Excluding {excluded} session(s) with < {MINIMUM_HEADLINES_PER_DAY} "
+              "headlines from exploratory signal statistics")
 
-    merged = pd.merge(prices, reliable_sent, on="date", how="inner").sort_values("date")
-    merged["same_return"] = merged["daily_return"]
+    merged = pd.merge(
+        prices, reliable_signals, on="date", how="inner"
+    ).sort_values("date")
+    merged["same_session_return"] = merged["daily_return"]
 
-    valid = merged.dropna(subset=["avg_score", "next_return"]).copy()
+    # The primary predictive sample requires the subsequent-session target.
+    # Contemporaneous returns are a separate diagnostic and must not shrink it
+    # merely because the price history starts on a signal date.
+    valid = merged.dropna(subset=["simple_mean", "next_return"]).copy()
+    same_valid = merged.dropna(
+        subset=["simple_mean", "same_session_return"]
+    ).copy()
     n     = len(valid)
 
-    _sub(f"Overlapping reliable days (sentiment + price): {n}")
+    _sub(f"Eligible session observations (simple_mean + subsequent return): {n}")
     _row("Gate threshold (MINIMUM_OVERLAP_DAYS)", MINIMUM_OVERLAP_DAYS)
 
     if n < MINIMUM_OVERLAP_DAYS:
-        _warn(f"Only {n} overlapping reliable days - need {MINIMUM_OVERLAP_DAYS}+ "
-              f"before signal stats are meaningful.")
-        _info("This is not a bug - it is a data-volume gate.")
-        _info("Keep running 'python main.py run' daily; signal eval will fill in.")
-        _info(f"Estimated time to gate: "
-              f"~{max(0, MINIMUM_OVERLAP_DAYS - n)} more trading days of data")
+        _warn(f"Only {n} eligible observations - the display gate is "
+              f"{MINIMUM_OVERLAP_DAYS}.")
+        _info("Crossing this gate permits exploratory reporting; it is not validation.")
+        _info("Keep running 'python main.py run'; the session sample will fill in.")
+        _info(f"Observations short of gate: "
+              f"{max(0, MINIMUM_OVERLAP_DAYS - n)} exchange sessions")
         return {"overlapping_days": n}
 
-    x      = valid["avg_score"].values
+    x      = valid["simple_mean"].values
     y_next = valid["next_return"].values
-    y_same = valid["same_return"].values
 
     # -- Pearson correlation ---------------------------------------------------
-    _sub("Pearson correlation")
+    _sub("Primary baseline: simple_mean (unweighted)")
 
     r_next, p_next = stats.pearsonr(x, y_next)
-    r_same, p_same = stats.pearsonr(x, y_same)
+    if (
+        len(same_valid) >= 2
+        and same_valid["simple_mean"].nunique() > 1
+        and same_valid["same_session_return"].nunique() > 1
+    ):
+        r_same, p_same = stats.pearsonr(
+            same_valid["simple_mean"], same_valid["same_session_return"]
+        )
+    else:
+        r_same, p_same = float("nan"), float("nan")
 
     def _sig(p: float) -> str:
         if p < 0.01: return "** (p<0.01)"
@@ -820,106 +927,130 @@ def audit_signal(db_path: str) -> dict:
         if p < 0.10: return ".  (p<0.10)"
         return "   (not significant)"
 
-    _row("r: sentiment(t) vs return(t+1)", f"{r_next:+.4f}", _sig(p_next))
-    _row("r: sentiment(t) vs return(t)",   f"{r_same:+.4f}", _sig(p_same))
+    _row("Pearson r: simple_mean(D) vs return(D+1)", f"{r_next:+.4f}", _sig(p_next))
+    if np.isfinite(r_same):
+        _row("Pearson r: simple_mean(D) vs return(D)", f"{r_same:+.4f}", _sig(p_same))
+    else:
+        _row(
+            "Pearson r: simple_mean(D) vs return(D)", "not estimable",
+            note=f"(n={len(same_valid)} complete contemporaneous pairs)",
+        )
 
     # Spearman: robust to outliers / non-linearity (review item, 2026-06-12)
     rho_next, rho_p = stats.spearmanr(x, y_next)
-    _row("Spearman rho: sentiment(t) vs return(t+1)", f"{rho_next:+.4f}", _sig(rho_p))
+    _row("Spearman rho: simple_mean(D) vs return(D+1)",
+         f"{rho_next:+.4f}", _sig(rho_p))
 
-    # -- Signal-date alignment (methodologically preferred) -------------------
-    # daily_sentiment_by_signal keys each day's sentiment by the first session
-    # that could react to the news (post-close/weekend news rolls forward).
-    # Under this alignment the natural test is sentiment(D) vs return(D).
-    with db._conn(db_path) as con:
-        sig = pd.read_sql_query(
-            "SELECT date, avg_score, headline_count FROM daily_sentiment_by_signal", con
+    # -- Weighting sensitivity -------------------------------------------------
+    # These alternatives share the same session assignment and return target.
+    # They are reported side-by-side without selecting the strongest in-sample
+    # result, which would turn a diagnostic into model fitting.
+    _sub("Weighting sensitivity vs subsequent-session return")
+    for column in SIGNAL_VARIANTS[1:]:
+        if column not in merged.columns:
+            _warn(f"Missing sensitivity variant: {column}")
+            continue
+        sensitivity = merged.dropna(subset=[column, "next_return"]).copy()
+        if len(sensitivity) < 5:
+            _info(f"{column}: n={len(sensitivity)} (fewer than 5 observations)")
+            continue
+        r_variant, p_variant = stats.pearsonr(
+            sensitivity[column], sensitivity["next_return"]
         )
-    if not sig.empty:
-        sig["date"] = pd.to_datetime(sig["date"])
-        sig = sig[sig["headline_count"] >= MINIMUM_HEADLINES_PER_DAY]
-        m2 = pd.merge(prices, sig, on="date", how="inner").dropna(
-            subset=["avg_score", "daily_return"])
-        _sub(f"Signal-date alignment (n={len(m2)} reliable days)")
-        if len(m2) >= 5:
-            r_sig, p_sig = stats.pearsonr(m2["avg_score"], m2["daily_return"])
-            _row("r: signal-aligned sentiment(D) vs return(D)", f"{r_sig:+.4f}", _sig(p_sig))
-            m2v = m2.dropna(subset=["next_return"])
-            if len(m2v) >= 5:
-                r_sig1, p_sig1 = stats.pearsonr(m2v["avg_score"], m2v["next_return"])
-                _row("r: signal-aligned sentiment(D) vs return(D+1)", f"{r_sig1:+.4f}", _sig(p_sig1))
-            _info("Signal alignment is the preferred convention going forward; "
-                  "calendar stats above are kept for comparison")
-        else:
-            _info("Not enough signal-aligned reliable days yet")
+        directional_variant = (
+            (sensitivity[column] > 0) == (sensitivity["next_return"] > 0)
+        ).mean()
+        _row(
+            column,
+            f"r={r_variant:+.4f}",
+            f"p={p_variant:.3f}; direction={directional_variant:.1%}; "
+            f"n={len(sensitivity)} (sensitivity only)",
+        )
 
-    if abs(r_next) < abs(r_same):
-        _info("Sentiment correlates more with same-day return than next-day")
-        _info("-> More consistent with sentiment LAGGING price (reaction)")
+    if np.isfinite(r_same) and abs(r_next) < abs(r_same):
+        _info("The contemporaneous association is larger in magnitude than the "
+              "subsequent-session association.")
+        _info("That timing pattern is consistent with reaction, but does not identify causality.")
     elif abs(r_next) > 0.15 and p_next < 0.10:
-        _ok("Sentiment shows a lead on next-day returns (promising signal)")
+        _info("An in-sample subsequent-session association is visible; treat it as exploratory.")
     else:
-        _info("Weak lead relationship - normal with limited data")
+        _info("No clear subsequent-session relationship is visible in this sample.")
 
     # -- Hit rate -------------------------------------------------------------
-    _sub("Hit rate (directional accuracy)")
-    valid["pos_sent"] = valid["avg_score"] > 0
-    valid["up_next"]  = valid["next_return"] > 0
-    hit_rate  = (valid["pos_sent"] == valid["up_next"]).mean()
-    n_pos     = valid["pos_sent"].sum()
-    n_neg     = (~valid["pos_sent"]).sum()
+    _sub("Primary-baseline directional agreement")
+    directional = valid.loc[
+        (valid["simple_mean"] != 0) & (valid["next_return"] != 0)
+    ].copy()
+    directional["pos_sent"] = directional["simple_mean"] > 0
+    directional["up_next"] = directional["next_return"] > 0
+    directional_n = len(directional)
+    hit_rate = (
+        float((directional["pos_sent"] == directional["up_next"]).mean())
+        if directional_n else None
+    )
+    n_pos = int(directional["pos_sent"].sum())
+    n_neg = directional_n - n_pos
 
-    _row("Overall hit rate", f"{hit_rate:.1%}", note="(50% = random)")
+    if hit_rate is None:
+        _info("No non-zero signal/return pairs are eligible for directional agreement")
+    else:
+        _row(
+            "Overall hit rate", f"{hit_rate:.1%}",
+            note=f"(n={directional_n}; zero directions excluded; 50% null)",
+        )
     if n_pos > 0:
-        pos_hit = valid.loc[valid["pos_sent"], "up_next"].mean()
+        pos_hit = directional.loc[directional["pos_sent"], "up_next"].mean()
         _row("  When pos sentiment -> market up?", f"{pos_hit:.1%}", f"(n={n_pos})")
     if n_neg > 0:
-        neg_hit = valid.loc[~valid["pos_sent"], "up_next"].mean()
+        neg_hit = directional.loc[~directional["pos_sent"], "up_next"].mean()
         _row("  When neg sentiment -> market down?", f"{1-neg_hit:.1%}", f"(n={n_neg})")
 
-    n_hits = int((valid["pos_sent"] == valid["up_next"]).sum())
-    binom  = stats.binomtest(n_hits, n, p=0.5)
-    _row("Binomial test p-value", f"{binom.pvalue:.4f}",
-         note="(p<0.05 = hit rate not random)")
+    if directional_n:
+        n_hits = int((directional["pos_sent"] == directional["up_next"]).sum())
+        binom = stats.binomtest(n_hits, directional_n, p=0.5)
+        _row("Binomial test p-value", f"{binom.pvalue:.4f}",
+             note="(two-sided test against a 50% null; exploratory)")
 
-    # Fixed-band hit rates: NOT tuned (tuning daily-score bands on this sample
+    # Fixed-band hit rates: NOT tuned (tuning session-score bands on this sample
     # would be in-sample fitting). Bands chosen a priori to mirror the headline
     # thresholds.
     for band in (0.05, 0.10):
-        sel = valid[valid["avg_score"].abs() >= band]
+        sel = valid[
+            (valid["simple_mean"].abs() >= band) & (valid["next_return"] != 0)
+        ]
         if len(sel) >= 5:
-            hr = ((sel["avg_score"] > 0) == (sel["next_return"] > 0)).mean()
+            hr = ((sel["simple_mean"] > 0) == (sel["next_return"] > 0)).mean()
             _row(f"  Hit rate where |sentiment| >= {band:.2f}", f"{hr:.1%}",
                  f"(n={len(sel)})")
 
-    # -- Naive strategy -------------------------------------------------------
-    _sub("Naive strategy: long when sentiment > 0, flat otherwise")
+    # -- Hypothetical exposure diagnostic ------------------------------------
+    _sub("Diagnostic exposure: long when simple_mean > 0, flat otherwise")
     valid["strategy_return"] = valid.apply(
-        lambda r: r["next_return"] if r["avg_score"] > 0 else 0.0, axis=1
+        lambda r: r["next_return"] if r["simple_mean"] > 0 else 0.0, axis=1
     )
     strat_total = valid["strategy_return"].sum()
     bnh_total   = valid["next_return"].sum()
-    _row("Strategy cumulative return %",      f"{strat_total:+.2f}")
+    _row("Hypothetical cumulative return %",  f"{strat_total:+.2f}")
     _row("Buy-and-hold cumulative return %",  f"{bnh_total:+.2f}")
 
     if strat_total > bnh_total:
-        _ok("Naive strategy outperforms buy-and-hold over this window")
+        _info("Hypothetical exposure has a higher in-sample sum over this window")
     else:
-        _info("Naive strategy underperforms buy-and-hold over this window")
+        _info("Hypothetical exposure has a lower in-sample sum over this window")
 
-    _info("NOTE: in-sample on limited data - purely diagnostic, not a trading signal")
+    _info("Not a validated strategy or alpha estimate; no costs or out-of-sample test.")
 
-    # -- Granger causality (if enough data) -----------------------------------
+    # -- Granger temporal-predictive diagnostic (if enough data) --------------
     if n >= 20:
-        _sub("Granger causality (does past sentiment predict returns?)")
+        _sub("Granger temporal-predictive diagnostic (exploratory)")
         try:
             from statsmodels.tsa.stattools import grangercausalitytests
             import io, contextlib
 
-            # Use SAME-day return: grangercausalitytests applies the lags itself,
-            # so lag-1 tests sentiment(t-1) -> return(t). Feeding next_return here
-            # would double-shift (sentiment(t-1) -> return(t+1), a 2-day lead).
-            data = valid[["same_return", "avg_score"]].dropna()
+            # Use the same-session return: grangercausalitytests applies its own
+            # lags, so lag 1 evaluates simple_mean(D-1) against return(D).
+            # Feeding next_return here would double-shift the outcome.
+            data = valid[["same_session_return", "simple_mean"]].dropna()
             buf  = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 result = grangercausalitytests(data, maxlag=2, verbose=True)
@@ -930,19 +1061,21 @@ def audit_signal(db_path: str) -> dict:
                 sig    = "(*)" if p_val < 0.10 else ""
                 _row(f"  Granger lag={lag}  F={f_stat:.3f}", f"p={p_val:.4f}", sig)
 
-            _info("p<0.10 suggests sentiment Granger-causes returns at that lag")
-            _info("Caveat: series has calendar gaps (weekends/thin days) — "
-                  "lags are row-based, treat as approximate")
+            _info("These p-values test incremental temporal association at each lag;")
+            _info("they do not establish economic or causal effects.")
+            _info("Caveat: thin-session filtering creates row gaps, so lags are approximate.")
         except ImportError:
             _info("Install statsmodels for Granger causality: pip install statsmodels")
     else:
-        _info(f"Granger causality needs 20+ reliable overlap days (have {n})")
+        _info(f"Granger diagnostic is hidden below 20 eligible observations (have {n})")
 
     return {
         "overlapping_days":  n,
+        "signal_variant":    "simple_mean",
         "pearson_r_next":    float(r_next),
         "pearson_p_next":    float(p_next),
-        "hit_rate":          float(hit_rate),
+        "hit_rate":          hit_rate,
+        "directional_observations": directional_n,
     }
 
 
@@ -976,6 +1109,7 @@ def _save_evaluate_report(results: dict) -> None:
         "price_days":          l4.get("days"),
         "unexpected_gaps":     l4.get("unexpected_gaps"),
         "overlap_days":        l5.get("overlapping_days"),
+        "signal_variant":      l5.get("signal_variant"),
         "pearson_r_next":      l5.get("pearson_r_next"),
         "pearson_p_next":      l5.get("pearson_p_next"),
         "hit_rate":            l5.get("hit_rate"),
@@ -993,11 +1127,11 @@ def _save_evaluate_report(results: dict) -> None:
             _hdr(f"TREND vs {prev.get('date', prev_files[-1].stem)}")
             trend_keys = [
                 ("total_headlines",     "Total headlines",    ""),
-                ("signal_days",         "Signal days",        ""),
-                ("overlap_days",        "Overlap days (L5)",  f"/{MINIMUM_OVERLAP_DAYS} gate"),
+                ("signal_days",         "Signal sessions",        ""),
+                ("overlap_days",        "Overlap sessions (L5)",  f"/{MINIMUM_OVERLAP_DAYS} gate"),
                 ("mean_score",          "Mean score",         ""),
                 ("other_pct",           "'other' category %", "%"),
-                ("pearson_r_next",      "Pearson r (t→t+1)",  ""),
+                ("pearson_r_next",      "Pearson r (session baseline D→D+1)",  ""),
                 ("hit_rate",            "Hit rate",           ""),
             ]
             for key, label, unit in trend_keys:
@@ -1039,19 +1173,20 @@ def print_summary(results: dict) -> None:
 
     rows = [
         ("L0 Pipeline runs logged",        l0.get("run_count",          "-")),
-        ("L0 Scored rows missing probs",   l0.get("missing_probs",      "-")),
+        ("L0 Scored rows missing components", l0.get("missing_probs",  "-")),
         ("L1 Total headlines",             l1.get("total",              "-")),
         ("L1 Has-date rate",               f"{l1.get('has_date_pct', 0):.0f}%"   if l1 else "-"),
         ("L1 'other' category %",          f"{l1.get('other_pct', 0):.1f}%"      if l1 else "-"),
         ("L2 Mean score",                  f"{l2.get('mean_score', 0):+.4f}"     if l2 else "-"),
         ("L2 Score std dev",               f"{l2.get('std_score', 0):.4f}"       if l2 else "-"),
-        ("L3 Days of signal",              l3.get("days",               "-")),
-        ("L3 Avg articles/day",            f"{l3.get('mean_articles_per_day', 0):.1f}" if l3 else "-"),
+        ("L3 Sessions with signal",         l3.get("days",               "-")),
+        ("L3 Avg articles/session",         f"{l3.get('mean_articles_per_day', 0):.1f}" if l3 else "-"),
         ("L4 Price days",                  l4.get("days",               "-")),
         ("L4 Unexpected price gaps",        l4.get("unexpected_gaps",    "-")),
-        ("L5 Overlap days (reliable)",     l5.get("overlapping_days",   "-")),
+        ("L5 Eligible overlap sessions",     l5.get("overlapping_days", "-")),
         ("L5 Gate threshold",              MINIMUM_OVERLAP_DAYS),
-        ("L5 Pearson r (t -> t+1)",        f"{l5.get('pearson_r_next', 0):+.4f}  "
+        ("L5 Pearson r (simple_mean D -> D+1 session)",
+                                           f"{l5.get('pearson_r_next', 0):+.4f}  "
                                            f"p={l5.get('pearson_p_next', 1):.3f}" if l5 and l5.get("pearson_r_next") else "-"),
         ("L5 Hit rate",                    f"{l5.get('hit_rate', 0):.1%}"         if l5 and l5.get("hit_rate") else "-"),
     ]
@@ -1060,7 +1195,8 @@ def print_summary(results: dict) -> None:
     for label, val in rows:
         print(f"  {label:<42} {val}")
     print()
-    _info(f"Signal gate: L5 stats shown only when overlap >= {MINIMUM_OVERLAP_DAYS} days")
+    _info(f"Exploratory display gate: overlap >= {MINIMUM_OVERLAP_DAYS} observations")
+    _info("The gate is not evidence of reliability, validated alpha, or a strategy.")
     _info("To grow signal: run 'python main.py run' (or 'run.bat run') daily")
 
 

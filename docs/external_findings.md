@@ -1,5 +1,9 @@
 # Zoom-out data: public attention & global media
 
+> **Dated research snapshot — generated 2026-07-07.** Sample lengths and
+> statistics below are fixed to that analysis run and should not be read as the
+> current database status.
+
 *Two new "different-vantage" data sources, connected to the market, the domestic
 press, and the media-polarization index. Scripts: `fetch_gtrends.py`,
 `fetch_gdelt.py`, `analyze_external.py`.*
@@ -9,8 +13,8 @@ press, and the media-polarization index. Scripts: `fetch_gtrends.py`,
 ## What was added
 
 - **Google Trends** (public attention): daily Turkey search interest for *dolar,
-  enflasyon, kriz, zam, faiz* — what the public is anxious about, independent of
-  the (politically biased) press. 128 days.
+  enflasyon, kriz, zam, faiz* — a public-attention proxy distinct from
+  outlet-associated press tone. 128 days.
 - **GDELT** (the world's media view): daily average media *tone* and article
   *volume* about Turkey's economy across global news. Mean tone **−1.1**
   (negative coverage). 125 days.

@@ -6,12 +6,13 @@ Usage
   python main.py run                      # full pipeline (recommended first run)
   python main.py scrape                   # fetch latest headlines only
   python main.py score                    # run sentiment model on unscored headlines
-  python main.py aggregate                # recompute daily sentiment aggregates
+  python main.py aggregate                # recompute session and descriptive aggregates
   python main.py prices                   # download BIST 100 price history
   python main.py plot                     # generate visualisation
   python main.py status                   # show DB statistics
-  python main.py clean                    # remove off-topic headlines from DB
-  python main.py clean --dry-run          # preview how many would be removed
+  python main.py clean                    # reversibly exclude off-topic headlines
+  python main.py clean --dry-run          # preview how many would be excluded
+  python main.py restore-exclusion ID     # restore one excluded headline
   python main.py export-labels            # export stratified CSV for model validation
   python main.py export-labels --n 300    # export 300 headlines (~100 per label)
 
@@ -55,31 +56,43 @@ def _setup_logging(level: str) -> None:
 
 def cmd_run(args: argparse.Namespace) -> None:
     print("\n>>  Running full sentiment pipeline ...\n")
-    p.run_all(
+    result = p.run_all(
         lookback_days=args.days,
         db_path=args.db,
         output_path=args.output,
         show_plot=not args.no_show,
     )
-    print("\n[OK]  Pipeline complete.\n")
+    print(f"\n[{result['status'].upper()}]  Pipeline run {result['run_id']} complete.\n")
+    if result["status"] == "failed":
+        raise RuntimeError("pipeline completed with failed component status")
 
 
 def cmd_scrape(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.scrape_step(lookback_days=args.days, db_path=args.db)
-    print(f"  {n} new headlines scraped and stored.")
+    outcome = p.scrape_step(
+        lookback_days=args.days, db_path=args.db, return_outcome=True,
+    )
+    print(f"  [{outcome.status}] {outcome.count} new headlines scraped and stored.")
+    if outcome.warnings:
+        print(f"  {len(outcome.warnings)} scrape warning(s); inspect source diagnostics.")
+    if outcome.status == "failed":
+        raise RuntimeError("all configured headline collection paths failed")
 
 
 def cmd_score(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.score_step(db_path=args.db)
-    print(f"  {n} headlines scored.")
+    outcome = p.score_step(db_path=args.db, return_outcome=True)
+    print(f"  [{outcome.status}] {outcome.count} headlines scored.")
+    if outcome.warnings:
+        print(f"  {len(outcome.warnings)} scoring warning(s); see 'status' for details.")
+    if outcome.status == "failed":
+        raise RuntimeError("sentiment scoring is unavailable")
 
 
 def cmd_aggregate(args: argparse.Namespace) -> None:
     db.init_db(args.db)
     n = p.aggregate_step(db_path=args.db)
-    print(f"  {n} days of daily sentiment computed.")
+    print(f"  {n} session-aligned baseline rows computed (plus sensitivities).")
 
 
 def cmd_recategorize(args: argparse.Namespace) -> None:
@@ -90,22 +103,26 @@ def cmd_recategorize(args: argparse.Namespace) -> None:
         print(f"  {result['recategorized']} categories changed by the LLM.")
         if result["low_relevance"]:
             print(f"  {len(result['low_relevance'])} headlines graded below the "
-                  f"aggregation threshold (kept in DB, weight ~0):")
+                  f"aggregation threshold (kept in DB, excluded reversibly):")
             for grade, t in result["low_relevance"]:
                 # ascii-fold for Windows consoles that aren't UTF-8
                 print(f"    [{grade:.1f}] {t[:85]}".encode("ascii", "replace").decode())
+        if result.get("missing"):
+            print(f"  [degraded] {result['missing']} omitted metadata result(s) "
+                  "remain unchanged after retries.")
         return
     n = p.recategorize_step(db_path=args.db, force=True)
     print(f"  {n} headlines recategorized.")
-    print("  Re-running aggregate to refresh daily_sentiment ...")
-    days = p.aggregate_step(db_path=args.db)
-    print(f"  {days} days of sentiment recomputed.")
+    print("  Re-running aggregate to refresh derived sentiment tables ...")
+    sessions = p.aggregate_step(db_path=args.db)
+    print(f"  {sessions} signal sessions recomputed.")
 
 
 def cmd_relabel(args: argparse.Namespace) -> None:
     """
     Recompute sentiment_label for all scored headlines from stored
-    probabilities using the CURRENT config thresholds, then re-aggregate.
+    backend-specific score components using the CURRENT config thresholds,
+    then re-aggregate. LLM components are synthetic compatibility values.
     Run this after changing SENTIMENT_*_THRESHOLD in config.py.
     """
     from config import SENTIMENT_POSITIVE_THRESHOLD, SENTIMENT_NEGATIVE_THRESHOLD
@@ -117,15 +134,19 @@ def cmd_relabel(args: argparse.Namespace) -> None:
     print(f"  {n} headline label(s) updated to current thresholds "
           f"(+{SENTIMENT_POSITIVE_THRESHOLD} / {SENTIMENT_NEGATIVE_THRESHOLD}).")
     if n:
-        print("  Re-running aggregate to refresh daily_sentiment ...")
-        days = p.aggregate_step(db_path=args.db)
-        print(f"  {days} days of sentiment recomputed.")
+        print("  Re-running aggregate to refresh derived sentiment tables ...")
+        sessions = p.aggregate_step(db_path=args.db)
+        print(f"  {sessions} signal sessions recomputed.")
 
 
 def cmd_prices(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.prices_step(lookback_days=args.days, db_path=args.db)
-    print(f"  {n} trading-day price rows stored.")
+    outcome = p.prices_step(
+        lookback_days=args.days, db_path=args.db, return_outcome=True,
+    )
+    print(f"  [{outcome.status}] {outcome.count} trading-day price rows stored.")
+    if outcome.status == "failed":
+        raise RuntimeError("market data download failed and the local cache is stale")
 
 
 def cmd_plot(args: argparse.Namespace) -> None:
@@ -145,31 +166,46 @@ def cmd_plot(args: argparse.Namespace) -> None:
 
 def cmd_fx_rates(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.fx_rates_step(lookback_days=args.days, db_path=args.db)
-    if n:
-        print(f"  {n} USD/TRY FX rate days stored.")
-    else:
-        print("  No FX data retrieved (check ALPHA_VANTAGE_KEY or rate limit).")
+    outcome = p.fx_rates_step(
+        lookback_days=args.days, db_path=args.db, return_outcome=True,
+    )
+    print(f"  [{outcome.status}] {outcome.count} USD/TRY FX rate days stored.")
+    if outcome.warnings:
+        print(f"  {len(outcome.warnings)} FX warning(s); inspect provider diagnostics.")
 
 
 def cmd_fetch_factors(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.factors_step(lookback_days=args.days, db_path=args.db)
-    print(f"  {n} market-factor rows stored (EM index + oil).")
+    outcome = p.factors_step(
+        lookback_days=args.days, db_path=args.db, return_outcome=True,
+    )
+    print(f"  [{outcome.status}] {outcome.count} market-factor rows stored (EM index + oil).")
+    if outcome.warnings:
+        print(f"  {len(outcome.warnings)} factor warning(s); inspect provider diagnostics.")
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
     db.init_db(args.db)
     if args.dry_run:
         n = p.clean_step(db_path=args.db, dry_run=True)
-        print(f"  [dry-run] {n} headlines would be removed by the current filter.")
-        print("  Run  'python main.py clean'  (without --dry-run) to delete them.")
+        print(f"  [dry-run] {n} headlines would be reversibly excluded by the current filter.")
+        print("  Run 'python main.py clean' to store exclusions; no raw rows are deleted.")
     else:
         n = p.clean_step(db_path=args.db, dry_run=False)
         if n == 0:
-            print("  No off-topic headlines found - DB is already clean.")
+            print("  No new off-topic exclusions were needed.")
         else:
-            print(f"  {n} off-topic headlines removed. Daily sentiment re-aggregated.")
+            print(f"  {n} off-topic headlines excluded; raw rows were preserved.")
+            print("  Session aggregates were recomputed without the excluded rows.")
+
+
+def cmd_restore_exclusion(args: argparse.Namespace) -> None:
+    db.init_db(args.db)
+    restored = p.restore_exclusion_step(args.headline_id, db_path=args.db)
+    if restored:
+        print(f"  Restored headline {args.headline_id}; aggregates recomputed.")
+    else:
+        print(f"  Headline {args.headline_id} has no active exclusion.")
 
 
 def cmd_export_labels(args: argparse.Namespace) -> None:
@@ -190,7 +226,7 @@ def cmd_export_labels(args: argparse.Namespace) -> None:
         1. python main.py export-labels --n 300
         2. Open labels_to_validate.csv in Excel / Google Sheets
         3. Fill the human_label column: positive / neutral / negative
-        4. Compute accuracy: (model_label == human_label).mean()
+        4. Compute categorical agreement: (model_label == human_label).mean()
         5. Break down by category to find where the model fails
     """
     import csv
@@ -296,11 +332,11 @@ def cmd_export_labels(args: argparse.Namespace) -> None:
     print("  Next steps:")
     print(f"    1. Open  {out}  in Excel or Google Sheets")
     print("    2. Fill the 'human_label' column: positive / neutral / negative")
-    print("    3. Compute accuracy: fraction where human_label == model_label")
+    print("    3. Compute agreement: fraction where human_label == model_label")
     print("    4. Break down errors by category to find weak spots")
     print("    5. Use errors to guide fine-tuning or rule overrides")
     print()
-    print("  Validation target: >= 70% accuracy per category on 300+ headlines")
+    print("  Evaluation target: >= 70% rubric agreement per category on 300+ headlines")
 
 
 def cmd_validate_labels(args: argparse.Namespace) -> None:
@@ -424,13 +460,16 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run",          parents=[shared], help="Run the full pipeline end-to-end")
     sub.add_parser("scrape",       parents=[shared], help="Scrape new headlines only")
     sub.add_parser("score",        parents=[shared], help="Run sentiment model on unscored headlines")
-    sub.add_parser("aggregate",    parents=[shared], help="Recompute daily sentiment aggregates")
+    sub.add_parser(
+        "aggregate", parents=[shared],
+        help="Recompute session baselines and descriptive aggregate variants",
+    )
     recat_p = sub.add_parser("recategorize", parents=[shared],
                              help="Re-classify ALL headlines (keyword rules, or --llm) + re-aggregate")
     recat_p.add_argument("--llm", action="store_true",
-                         help="Use the LLM for category + relevance (deletes irrelevant headlines)")
+                         help="Use the LLM for category + stored relevance grading")
     sub.add_parser("relabel",      parents=[shared],
-                   help="Recompute sentiment labels from stored probabilities with current thresholds")
+                   help="Recompute labels from stored compatibility components with current thresholds")
     sub.add_parser("prices",       parents=[shared], help="Download BIST 100 price history")
     sub.add_parser("fx-rates",     parents=[shared], help="Download USD/TRY FX rates (Alpha Vantage)")
     sub.add_parser("fetch-factors", parents=[shared],
@@ -449,13 +488,19 @@ def _build_parser() -> argparse.ArgumentParser:
     clean_p = sub.add_parser(
         "clean",
         parents=[shared],
-        help="Remove off-topic headlines that fail the current relevance filter",
+        help="Reversibly exclude off-topic headlines; raw rows are preserved",
     )
     clean_p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show how many headlines would be removed without deleting anything",
+        help="Show how many headlines would be excluded without changing metadata",
     )
+    restore_p = sub.add_parser(
+        "restore-exclusion",
+        parents=[shared],
+        help="Restore one active headline exclusion and recompute aggregates",
+    )
+    restore_p.add_argument("headline_id", type=int, help="Canonical headline ID")
 
     export_p = sub.add_parser(
         "export-labels",
@@ -483,7 +528,7 @@ def _build_parser() -> argparse.ArgumentParser:
     val_p = sub.add_parser(
         "validate-labels",
         parents=[shared],
-        help="Validate model accuracy against a human-labeled CSV",
+        help="Measure agreement with the project's human-label rubric",
     )
     val_p.add_argument(
         "labels_csv", nargs="?",
@@ -521,6 +566,7 @@ _COMMANDS = {
     "migrate-events":   cmd_migrate_events,
     "kap-ingest":       cmd_kap_ingest,
     "clean":            cmd_clean,
+    "restore-exclusion": cmd_restore_exclusion,
     "export-labels":    cmd_export_labels,
     "validate-labels":  cmd_validate_labels,
 }

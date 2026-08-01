@@ -16,6 +16,8 @@ import json
 import logging
 from datetime import datetime
 
+import pandas as pd
+
 import database as db
 from config import DB_PATH, MINIMUM_HEADLINES_PER_DAY, MINIMUM_OVERLAP_DAYS
 
@@ -30,30 +32,45 @@ RECENT_RUNS = 7          # pipeline run dots
 # -- Data collection -------------------------------------------------------------
 
 def _collect(db_path: str = DB_PATH) -> dict:
+    # The market-linked chart has one row per reaction session and uses the
+    # pre-specified unweighted baseline.  ``avg_score`` remains an internal
+    # compatibility name for the HTML template; no publication-date-table
+    # fallback is allowed here.
+    variants = db.get_signal_variants(db_path=db_path)
+    if variants.empty:
+        sent = []
+        reliable = 0
+    else:
+        variants = variants.copy().rename(columns={"simple_mean": "avg_score"})
+        variants["date"] = pd.to_datetime(variants["date"])
+        variants = variants.sort_values("date")
+        price_start = variants["date"].min().date().isoformat()
+        prices = db.get_prices(start=price_start, db_path=db_path).copy()
+        if prices.empty:
+            variants["close"] = None
+        else:
+            prices["date"] = pd.to_datetime(prices["date"])
+            variants = variants.merge(
+                prices[["date", "close"]], on="date", how="left"
+            )
+        reliable = int(
+            (
+                (variants["headline_count"] >= MINIMUM_HEADLINES_PER_DAY)
+                & variants["close"].notna()
+            ).sum()
+        )
+        variants["close"] = variants["close"].astype(object).where(
+            variants["close"].notna(), None
+        )
+        variants["date"] = variants["date"].dt.strftime("%Y-%m-%d")
+        sent = variants.tail(CHART_DAYS).to_dict("records")
+
     with db._conn(db_path) as con:
         total = con.execute("SELECT COUNT(*) FROM headlines").fetchone()[0]
         sources = con.execute("SELECT COUNT(DISTINCT source) FROM headlines").fetchone()[0]
         first_day, last_day = con.execute(
             "SELECT MIN(published_at), MAX(published_at) FROM headlines"
         ).fetchone()
-
-        sent = con.execute(
-            """SELECT ds.date, ds.avg_score, ds.headline_count,
-                      ds.positive_count, ds.neutral_count, ds.negative_count,
-                      bp.close
-               FROM daily_sentiment ds
-               LEFT JOIN bist100_prices bp ON bp.date = ds.date
-               ORDER BY ds.date DESC LIMIT ?""",
-            (CHART_DAYS,),
-        ).fetchall()
-        sent = list(reversed(sent))
-
-        reliable = con.execute(
-            """SELECT COUNT(*) FROM daily_sentiment ds
-               JOIN bist100_prices bp ON bp.date = ds.date
-               WHERE ds.headline_count >= ?""",
-            (MINIMUM_HEADLINES_PER_DAY,),
-        ).fetchone()[0]
 
         cats = con.execute(
             """SELECT category, COUNT(*) AS n FROM headlines
@@ -81,7 +98,7 @@ def _collect(db_path: str = DB_PATH) -> dict:
         "sources": sources,
         "first_day": first_day,
         "last_day": last_day,
-        "sent": [dict(r) for r in sent],
+        "sent": sent,
         "reliable": reliable,
         "cats": [dict(r) for r in cats],
         "heads": [dict(r) for r in heads],
@@ -98,6 +115,21 @@ def _mood(score: float) -> tuple[str, str, str]:
     if score < -0.05:
         return "&#128577;", "Negative", "neg"
     return "&#128528;", "Neutral", "neu"
+
+
+def _run_status_display(status: str) -> tuple[str, str]:
+    """Return a three-state CSS class and human-readable run label."""
+    canonical = {
+        "ok": "success",
+        "recovered": "success",
+        "error": "failed",
+        "crashed": "failed",
+    }.get(status, status)
+    if canonical == "success":
+        return "ok", "Running normally"
+    if canonical in {"degraded", "running"}:
+        return "warn", f"Last run: {canonical}"
+    return "bad", f"Last run: {canonical}"
 
 
 _CAT_LABELS = {
@@ -136,7 +168,8 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         emoji, mood_label, mood_cls = _mood(latest["avg_score"])
         latest_html = (
             f'<div class="big {mood_cls}">{emoji} {mood_label}</div>'
-            f'<div class="sub">{latest["date"]} &middot; {latest["headline_count"]} headlines '
+            f'<div class="sub">Reaction session {latest["date"]} &middot; '
+            f'{latest["headline_count"]} headlines '
             f'({latest["positive_count"]} good / {latest["neutral_count"]} neutral / '
             f'{latest["negative_count"]} bad)</div>'
         )
@@ -161,13 +194,12 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     # -- Run dots --
     dots = []
     for r in reversed(d["runs"]):
-        ok = r["status"] in ("ok", "recovered")
-        cls = "ok" if ok else "bad"
+        cls, _ = _run_status_display(r["status"])
         tip = f'{r["started_at"][:10]} — {r["status"]}, {r["headlines_scraped"]} new headlines'
         dots.append(f'<span class="dot {cls}" title="{tip}"></span>')
     dots_html = "".join(dots)
     last_status = d["runs"][0]["status"] if d["runs"] else "—"
-    status_ok = last_status in ("ok", "recovered")
+    run_cls, run_label = _run_status_display(last_status)
 
     html = _TEMPLATE
     for key, val in {
@@ -182,8 +214,8 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         "__PCT__":         str(pct),
         "__HEADS__":       heads_html,
         "__DOTS__":        dots_html,
-        "__RUN_STATUS__":  "Running normally" if status_ok else f"Last run: {last_status}",
-        "__RUN_CLS__":     "ok" if status_ok else "bad",
+        "__RUN_STATUS__":  run_label,
+        "__RUN_CLS__":     run_cls,
         "__LABELS__":      json.dumps(labels),
         "__SCORES__":      json.dumps(scores),
         "__CLOSES__":      json.dumps(closes),
@@ -217,6 +249,7 @@ _TEMPLATE = """<!DOCTYPE html>
   .meta { color:#6b7280; font-size:.85rem; margin-bottom:20px; }
   .pill { display:inline-block; padding:2px 12px; border-radius:999px; font-size:.8rem; font-weight:600; margin-left:8px; }
   .pill.ok  { background:#dcfce7; color:#166534; }
+  .pill.warn { background:#fef3c7; color:#92400e; }
   .pill.bad { background:#fee2e2; color:#991b1b; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin-bottom:20px; }
   .card { background:#fff; border-radius:14px; padding:18px 20px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
@@ -239,7 +272,9 @@ _TEMPLATE = """<!DOCTYPE html>
   .chip.neg { background:#fee2e2; color:#991b1b; }
   .chip.neu { background:#f3f4f6; color:#4b5563; }
   .dot { display:inline-block; width:14px; height:14px; border-radius:50%; margin-right:6px; }
-  .dot.ok { background:var(--green); } .dot.bad { background:var(--red); }
+  .dot.ok { background:var(--green); }
+  .dot.warn { background:#d97706; }
+  .dot.bad { background:var(--red); }
   .note { background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px;
           padding:12px 16px; font-size:.84rem; margin-bottom:20px; }
   footer { color:#9ca3af; font-size:.78rem; text-align:center; margin-top:24px; }
@@ -252,13 +287,13 @@ _TEMPLATE = """<!DOCTYPE html>
   <div class="meta">Reads Turkish financial news every weekday, measures the mood, and compares it
   with the Istanbul stock exchange. Updated: __GENERATED__</div>
 
-  <div class="note"><b>Research project</b> — the model agrees with a human reader about 5 times
-  out of 6 on checked headlines, and we still need more data before mood&ndash;market statistics
-  mean anything. Nothing here is investment advice.</div>
+  <div class="note"><b>Research project</b> — production prompt p3 reached 83.3% categorical
+  agreement with this project's held-out human-label rubric. Market-return analysis remains
+  exploratory and is not a validated strategy. Nothing here is investment advice.</div>
 
   <div class="grid">
     <div class="card">
-      <h3>Today's news mood</h3>
+      <h3>Latest session-aligned news mood</h3>
       __LATEST__
     </div>
     <div class="card">
@@ -267,17 +302,18 @@ _TEMPLATE = """<!DOCTYPE html>
       <div class="sub">from __SOURCES__ Turkish news sources<br>__FIRST_DAY__ &rarr; __LAST_DAY__</div>
     </div>
     <div class="card">
-      <h3>Progress to reliable statistics</h3>
-      <div class="big">__RELIABLE__ / __NEEDED__ days</div>
+      <h3>Exploratory reporting observations</h3>
+      <div class="big">__RELIABLE__ / __NEEDED__ observations</div>
       <div class="bar-outer"><div class="bar-inner" style="width:__PCT__%"></div></div>
-      <div class="sub">days with enough news AND market data &mdash; statistics unlock at __NEEDED__</div>
+      <div class="sub">eligible news-and-market observations; __NEEDED__ is a display gate, not validation</div>
     </div>
   </div>
 
   <div class="card chart-card">
-    <h3>News mood vs. stock market (last 60 days)</h3>
-    <div class="sub" style="margin-bottom:10px">Green bars = positive news days, red = negative.
-    Faded bars had too little news to trust. Blue line = BIST 100 index closing value.</div>
+    <h3>Session-aligned unweighted news mood vs. stock market (last 60 sessions)</h3>
+    <div class="sub" style="margin-bottom:10px">Bars are the unweighted baseline assigned to
+    the first market session able to react. Faded bars are thin observations. Blue line =
+    BIST 100 session close. Any subsequent-return comparison is exploratory.</div>
     <canvas id="mainChart" height="95"></canvas>
   </div>
 
@@ -299,7 +335,7 @@ _TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <footer>Generated automatically by dashboard.py &middot; data: RSS headlines + Yahoo Finance &middot;
-  sentiment: gpt-5-mini (84.5% on human-checked headlines)</footer>
+  sentiment: gpt-5-mini/p3 (83.3% agreement with the held-out project rubric)</footer>
 </div>
 
 <script>
@@ -312,7 +348,7 @@ new Chart(document.getElementById('mainChart'), {
   data: {
     labels: labels,
     datasets: [
-      { type:'bar',  label:'News mood', data:scores, backgroundColor:barcols, yAxisID:'y1', order:2 },
+      { type:'bar',  label:'Session-aligned unweighted news mood', data:scores, backgroundColor:barcols, yAxisID:'y1', order:2 },
       { type:'line', label:'BIST 100',  data:closes, borderColor:'#2C7BB6', backgroundColor:'#2C7BB6',
         spanGaps:true, pointRadius:0, borderWidth:2, tension:.25, yAxisID:'y', order:1 },
     ]
@@ -322,7 +358,7 @@ new Chart(document.getElementById('mainChart'), {
     plugins:{ legend:{ labels:{ boxWidth:14 } } },
     scales: {
       y:  { position:'right', title:{ display:true, text:'BIST 100' }, grid:{ display:false } },
-      y1: { position:'left',  min:-1, max:1, title:{ display:true, text:'News mood (-1 … +1)' } },
+      y1: { position:'left',  min:-1, max:1, title:{ display:true, text:'Unweighted news mood (-1 … +1)' } },
       x:  { ticks:{ maxTicksLimit:15 } }
     }
   }
