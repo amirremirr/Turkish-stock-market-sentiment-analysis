@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS headlines (
     p_neutral       REAL,
     p_negative      REAL,
     model_name      TEXT,
+    experiment_id   TEXT,
     scored_at       TEXT,
     processing_status       TEXT NOT NULL DEFAULT 'pending'
         CHECK (processing_status IN ('pending', 'scored', 'retry_pending', 'failed')),
@@ -318,6 +319,7 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("headlines", "p_neutral",      "REAL"),
     ("headlines", "p_negative",     "REAL"),
     ("headlines", "model_name",     "TEXT"),
+    ("headlines", "experiment_id",  "TEXT"),
     ("headlines", "published_hour", "INTEGER"),  # Istanbul local hour (0-23), UTC+3
     ("headlines", "published_timestamp", "TEXT"),
     ("headlines", "timing_bucket",       "TEXT"),
@@ -800,6 +802,17 @@ def _infer_score_components_kind(model_name: Optional[str]) -> str:
     return "legacy_unknown"
 
 
+def _resolve_experiment_id(experiment_id: Optional[str]) -> str:
+    """Return a non-empty experiment ID for a newly persisted score."""
+    if experiment_id is None:
+        from config import EXPERIMENT_ID
+        experiment_id = EXPERIMENT_ID
+    resolved = str(experiment_id).strip()
+    if not resolved:
+        raise ValueError("experiment_id must be a non-empty string")
+    return resolved
+
+
 def mark_scoring_success(
     headline_id: int,
     score: float,
@@ -810,6 +823,8 @@ def mark_scoring_success(
     model_name: str,
     score_components_kind: Optional[str] = None,
     db_path: str = DB_PATH,
+    *,
+    experiment_id: Optional[str] = None,
 ) -> bool:
     """Atomically persist one successful scoring attempt.
 
@@ -819,6 +834,7 @@ def mark_scoring_success(
     if label not in {"positive", "neutral", "negative"}:
         raise ValueError(f"unsupported sentiment label: {label!r}")
     kind = score_components_kind or _infer_score_components_kind(model_name)
+    resolved_experiment_id = _resolve_experiment_id(experiment_id)
     now = _now_iso()
     with _conn(db_path) as con:
         row = con.execute(
@@ -833,14 +849,14 @@ def mark_scoring_success(
             """UPDATE headlines
                SET sentiment_score=?, sentiment_label=?,
                    p_positive=?, p_neutral=?, p_negative=?,
-                   model_name=?, scored_at=?, score_components_kind=?,
+                   model_name=?, experiment_id=?, scored_at=?, score_components_kind=?,
                    processing_status='scored',
                    scoring_attempts=scoring_attempts + 1,
                    last_scoring_attempt_at=?, scoring_last_error=NULL
                WHERE id=?""",
             (
                 score, label, p_positive, p_neutral, p_negative,
-                model_name, now, kind, now, headline_id,
+                model_name, resolved_experiment_id, now, kind, now, headline_id,
             ),
         )
     return True
@@ -926,6 +942,8 @@ def mark_scoring_attempt_failed(
 def batch_update_sentiment(
     scores: Iterable[Tuple],
     db_path: str = DB_PATH,
+    *,
+    experiment_id: Optional[str] = None,
 ) -> None:
     """
     Update sentiment for multiple headlines in one transaction.
@@ -957,12 +975,17 @@ def batch_update_sentiment(
         ))
     if not rows:
         return
+    resolved_experiment_id = _resolve_experiment_id(experiment_id)
+    rows = [
+        (*row[:6], resolved_experiment_id, *row[6:])
+        for row in rows
+    ]
     with _conn(db_path) as con:
         con.executemany(
             """UPDATE headlines
                SET sentiment_score=?, sentiment_label=?,
                    p_positive=?, p_neutral=?, p_negative=?,
-                   model_name=?, scored_at=?, score_components_kind=?,
+                   model_name=?, experiment_id=?, scored_at=?, score_components_kind=?,
                    processing_status='scored',
                    scoring_attempts=scoring_attempts + 1,
                    last_scoring_attempt_at=?, scoring_last_error=NULL
@@ -970,6 +993,40 @@ def batch_update_sentiment(
             rows,
         )
     logger.info("Updated sentiment for %d headlines", len(rows))
+
+
+def get_eligible_experiment_ids(db_path: str = DB_PATH) -> List[str]:
+    """Return distinct score-experiment identities eligible for aggregation.
+
+    Historical rows predate per-score experiment provenance. They remain NULL
+    and are represented conservatively by a clearly marked model-scoped legacy
+    identity; migration never invents an experiment assignment for them.
+    """
+    with _conn(db_path) as con:
+        rows = con.execute(
+            """SELECT DISTINCT
+                      CASE
+                          WHEN TRIM(COALESCE(h.experiment_id, '')) <> ''
+                              THEN h.experiment_id
+                          ELSE '[legacy-unassigned] model=' || h.model_name
+                      END AS eligible_experiment_id
+               FROM headlines AS h
+               WHERE h.processing_status = 'scored'
+                 AND h.sentiment_score IS NOT NULL
+                 AND h.sentiment_label IS NOT NULL
+                 AND h.model_name IS NOT NULL
+                 AND h.scored_at IS NOT NULL
+                 AND h.p_positive IS NOT NULL
+                 AND h.p_neutral IS NOT NULL
+                 AND h.p_negative IS NOT NULL
+                 AND h.published_at IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM headline_exclusions AS x
+                     WHERE x.headline_id = h.id AND x.restored_at IS NULL
+                 )
+               ORDER BY eligible_experiment_id"""
+        ).fetchall()
+    return [str(row["eligible_experiment_id"]) for row in rows]
 
 
 def relabel_from_probs(

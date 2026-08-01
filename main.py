@@ -61,6 +61,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         db_path=args.db,
         output_path=args.output,
         show_plot=not args.no_show,
+        allow_mixed_experiments=args.allow_mixed_experiments,
     )
     print(f"\n[{result['status'].upper()}]  Pipeline run {result['run_id']} complete.\n")
     if result["status"] == "failed":
@@ -91,8 +92,15 @@ def cmd_score(args: argparse.Namespace) -> None:
 
 def cmd_aggregate(args: argparse.Namespace) -> None:
     db.init_db(args.db)
-    n = p.aggregate_step(db_path=args.db)
-    print(f"  {n} session-aligned baseline rows computed (plus sensitivities).")
+    outcome = p.aggregate_step(
+        db_path=args.db,
+        allow_mixed_experiments=args.allow_mixed_experiments,
+        return_outcome=True,
+    )
+    print(
+        f"  [{outcome.status}] {outcome.count} session-aligned baseline rows "
+        "computed (plus sensitivities)."
+    )
 
 
 def cmd_recategorize(args: argparse.Namespace) -> None:
@@ -457,12 +465,24 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
 
-    sub.add_parser("run",          parents=[shared], help="Run the full pipeline end-to-end")
+    run_p = sub.add_parser(
+        "run", parents=[shared], help="Run the full pipeline end-to-end"
+    )
+    run_p.add_argument(
+        "--allow-mixed-experiments",
+        action="store_true",
+        help="explicitly aggregate eligible scores from multiple experiment IDs",
+    )
     sub.add_parser("scrape",       parents=[shared], help="Scrape new headlines only")
     sub.add_parser("score",        parents=[shared], help="Run sentiment model on unscored headlines")
-    sub.add_parser(
+    aggregate_p = sub.add_parser(
         "aggregate", parents=[shared],
         help="Recompute session baselines and descriptive aggregate variants",
+    )
+    aggregate_p.add_argument(
+        "--allow-mixed-experiments",
+        action="store_true",
+        help="explicitly aggregate eligible scores from multiple experiment IDs",
     )
     recat_p = sub.add_parser("recategorize", parents=[shared],
                              help="Re-classify ALL headlines (keyword rules, or --llm) + re-aggregate")

@@ -26,6 +26,7 @@ from config import (
     BIST100_TICKER,
     DB_PATH,
     DEFAULT_LOOKBACK_DAYS,
+    EXPERIMENT_ID,
     LLM_SENTIMENT_MODEL,
     LLM_SCORING_MAX_ATTEMPTS,
     MARKET_DATA_STALE_AFTER_DAYS,
@@ -67,6 +68,18 @@ class StepOutcome:
     warnings: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)
     details: Dict[str, Any] = field(default_factory=dict)
+
+
+class MixedExperimentAggregationError(RuntimeError):
+    """Raised when eligible scores span more than one experiment identity."""
+
+    def __init__(self, experiment_ids: List[str]):
+        self.experiment_ids = list(experiment_ids)
+        joined = ", ".join(self.experiment_ids)
+        super().__init__(
+            "aggregation blocked because eligible scores span multiple "
+            f"experiment identities: {joined}"
+        )
 
 
 def _issue(component: str, code: str, message: str, **details: Any) -> Dict[str, Any]:
@@ -283,6 +296,7 @@ def _score_candidates(unscored: pd.DataFrame, scorer, db_path: str) -> StepOutco
                         for row, result in success_rows
                     ],
                     db_path=db_path,
+                    experiment_id=EXPERIMENT_ID,
                 )
                 db.update_categories(
                     [(result["category"], row["id"]) for row, result in success_rows],
@@ -302,6 +316,7 @@ def _score_candidates(unscored: pd.DataFrame, scorer, db_path: str) -> StepOutco
                         for row, result in success_rows
                     ],
                     db_path=db_path,
+                    experiment_id=EXPERIMENT_ID,
                 )
             scored_count += len(success_rows)
 
@@ -476,7 +491,12 @@ def recategorize_llm_step(db_path: str = DB_PATH) -> dict:
     }
 
 
-def aggregate_step(db_path: str = DB_PATH) -> int:
+def aggregate_step(
+    db_path: str = DB_PATH,
+    *,
+    allow_mixed_experiments: bool = False,
+    return_outcome: bool = False,
+):
     """
     Recompute descriptive and session-aligned sentiment derived tables.
 
@@ -494,9 +514,42 @@ def aggregate_step(db_path: str = DB_PATH) -> int:
     ``daily_signal_variants.simple_mean`` is the primary session baseline. The
     legacy daily tables retain ``full_weighted`` for descriptive compatibility.
 
-    Returns the number of distinct signal sessions processed.
+    Aggregation is blocked before any mutation when eligible scores span more
+    than one experiment identity. ``allow_mixed_experiments=True`` is an
+    explicit override; the structured outcome is then degraded and includes a
+    persisted-ready warning. Returns the number of distinct signal sessions by
+    default, or a :class:`StepOutcome` when ``return_outcome=True``.
     """
     logger.info("=== STEP 3: Aggregate ===")
+
+    experiment_ids = db.get_eligible_experiment_ids(db_path=db_path)
+    mixed_experiments = len(experiment_ids) > 1
+    if mixed_experiments and not allow_mixed_experiments:
+        raise MixedExperimentAggregationError(experiment_ids)
+
+    aggregation_warnings: List[Dict[str, Any]] = []
+    aggregation_status = "success"
+    if mixed_experiments:
+        aggregation_status = "degraded"
+        aggregation_warnings.append(_issue(
+            "aggregation",
+            "mixed_experiments_allowed",
+            "Explicit override allowed aggregation across multiple experiment identities",
+            experiment_ids=experiment_ids,
+        ))
+
+    def _result(count: int):
+        outcome = StepOutcome(
+            count=count,
+            status=aggregation_status,
+            warnings=aggregation_warnings,
+            details={
+                "eligible_experiment_ids": experiment_ids,
+                "mixed_experiments": mixed_experiments,
+                "mixed_experiments_override": bool(allow_mixed_experiments),
+            },
+        )
+        return outcome if return_outcome else count
 
     # -- Backfill NULL categories only (fast path) ----------------------------
     recategorize_step(db_path=db_path, force=False)
@@ -553,7 +606,7 @@ def aggregate_step(db_path: str = DB_PATH) -> int:
 
     if df.empty:
         logger.warning("No scored headlines with dates found - aggregate tables left empty.")
-        return 0
+        return _result(0)
 
     from aggregation.signals import compute_signal_variants
 
@@ -638,7 +691,7 @@ def aggregate_step(db_path: str = DB_PATH) -> int:
         "Aggregate complete: %d signal sessions | %d calendar days | %d category-session rows",
         len(variant_rows), len(overall_rows), len(category_signal_rows),
     )
-    return len(variant_rows)
+    return _result(len(variant_rows))
 
 
 # -----------------------------------------------------------------------------
@@ -954,6 +1007,7 @@ def run_all(
     skip_aggregate: bool = False,
     skip_prices: bool = False,
     skip_plot: bool = False,
+    allow_mixed_experiments: bool = False,
 ) -> Dict[str, Any]:
     """Run every component and persist explicit run/component outcomes."""
     db.init_db(db_path=db_path)
@@ -1001,10 +1055,19 @@ def run_all(
         if not skip_aggregate:
             active_component = "aggregation"
             component_status[active_component] = "running"
-            n = aggregate_step(db_path=db_path)
-            stats["sentiment_days"] = n
-            component_status[active_component] = "success"
-            print(f"  [SUCCESS] Aggregate - {n} signal sessions computed")
+            aggregation = aggregate_step(
+                db_path=db_path,
+                allow_mixed_experiments=allow_mixed_experiments,
+                return_outcome=True,
+            )
+            stats["sentiment_days"] = aggregation.count
+            component_status[active_component] = aggregation.status
+            warnings.extend(aggregation.warnings)
+            errors.extend(aggregation.errors)
+            print(
+                f"  [{aggregation.status.upper()}] Aggregate - "
+                f"{aggregation.count} signal sessions computed"
+            )
 
         price_outcome: Optional[StepOutcome] = None
         if not skip_prices:
@@ -1107,6 +1170,13 @@ def run_all(
         for key, value in list(component_status.items()):
             if value == "pending":
                 component_status[key] = "skipped"
+        if isinstance(exc, MixedExperimentAggregationError):
+            errors.append(_issue(
+                "aggregation",
+                "mixed_experiments_blocked",
+                str(exc),
+                experiment_ids=exc.experiment_ids,
+            ))
         error = _issue(
             active_component or "pipeline",
             "component_exception",

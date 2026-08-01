@@ -181,6 +181,9 @@ def test_production_legacy_migration_is_additive_idempotent_and_nonregenerating(
         statuses = con.execute(
             "SELECT processing_status FROM headlines ORDER BY id"
         ).fetchall()
+        historical_experiment_ids = con.execute(
+            "SELECT experiment_id FROM headlines ORDER BY id"
+        ).fetchall()
 
     assert row_counts_after == row_counts_before
     assert scores_after == scores_before
@@ -192,6 +195,10 @@ def test_production_legacy_migration_is_additive_idempotent_and_nonregenerating(
         "headline_exclusions": 0,
     }
     assert [row[0] for row in statuses] == ["scored", "scored", "pending"]
+    assert [row[0] for row in historical_experiment_ids] == [None, None, None]
+    assert db.get_eligible_experiment_ids(production_legacy_db) == [
+        "[legacy-unassigned] model=gpt-5-mini-2025-08-07/p3"
+    ]
 
 
 def test_schema_and_foreign_keys_are_additive_and_idempotent(integrity_db):
@@ -207,7 +214,7 @@ def test_schema_and_foreign_keys_are_additive_and_idempotent(integrity_db):
         indexes = {row[1] for row in con.execute("PRAGMA index_list(headlines)")}
     assert {
         "processing_status", "scoring_attempts", "last_scoring_attempt_at",
-        "scoring_last_error", "score_components_kind",
+        "scoring_last_error", "score_components_kind", "experiment_id",
     } <= headline_columns
     assert {
         "scrape_status", "scoring_status", "aggregation_status",
