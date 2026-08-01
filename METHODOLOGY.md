@@ -125,7 +125,9 @@ full_weighted
 
 `simple_mean` is the primary baseline. In current pipeline calls, source and category multipliers take their neutral default of 1.0, so `full_weighted` reproduces the historical intensity x relevance x time formula. The intensity floor keeps an explicit zero-score neutral observation from automatically receiving zero weight. It is an engineering convention, not confidence.
 
-The same row stores headline and label counts, positive/negative/neutral shares, unclassified count, population dispersion, source count, event count, and the three weighted denominators. A weighted zero denominator returns NULL rather than silently falling back to the simple mean.
+The same row stores headline and label counts, positive/negative/neutral shares, unclassified count, population dispersion, source count, `event_count`, and the three weighted denominators. Here `event_count` means distinct bridge-linked event records attached to the eligible headlines. It is not a count of independently resolved real-world events and must not be interpreted as independent event coverage. A weighted zero denominator returns NULL rather than silently falling back to the simple mean.
+
+Eligible scores must also share one experiment identity. New score writes store the configured experiment ID. Historical rows retain NULL rather than receiving inferred provenance and are represented by a clearly marked, model-scoped legacy identity. If more than one eligible identity is present, aggregation stops before changing session assignments, exclusions, or any derived table. Mixing is possible only with the explicit `allow_mixed_experiments`/`--allow-mixed-experiments` override; a full pipeline run then persists a degraded aggregation state and the identities that were mixed.
 
 `analysis.prediction.sensitivity` compares all four variants through pairwise correlations, directional agreement, distributions, and next-session exploratory metrics. It sets `preferred_variant` to NULL and does not tune or choose a specification on the evaluation sample.
 

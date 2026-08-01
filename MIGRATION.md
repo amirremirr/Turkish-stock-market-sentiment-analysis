@@ -60,7 +60,9 @@ Predictive code no longer uses the calendar aggregate as a fallback. `daily_sign
 
 ## Additive schema changes through 2026-08-01
 
-The migration discipline remains add-only. `database.init_db()` uses idempotent table creation and `ALTER TABLE` for missing columns; no current migration drops or rewrites a table.
+The migration discipline remains add-only. `database.init_db()` uses idempotent table creation and `ALTER TABLE` for missing columns; no current migration drops or rewrites a table. The score-level `headlines.experiment_id` migration is nullable: historical rows remain unassigned, and their scores and labels are not rewritten. Schema initialization does not rebuild any derived research table.
+
+Aggregation now enforces that provenance boundary. More than one eligible experiment identity blocks the rebuild before any derived rows are cleared. Operators may use `--allow-mixed-experiments` only as an explicit exception; a full run persists the aggregation as degraded and records the identities. Legacy NULL provenance is displayed as a model-scoped unassigned identity rather than silently mapped to the current experiment.
 
 ### Processing and provenance columns
 
@@ -121,6 +123,7 @@ All market-linked consumers now use the session baseline. Next-session targets a
 The sensitivity command compares them without selecting a winner on the evaluation sample:
 
 ```bash
+python main.py aggregate --db finance_sentiment.db
 python -m analysis.prediction.sensitivity --db finance_sentiment.db --output outputs/signal_sensitivity.json
 ```
 

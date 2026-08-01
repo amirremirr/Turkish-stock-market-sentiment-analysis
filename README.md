@@ -61,11 +61,11 @@ The null hypothesis is **no signal**. The pipeline is designed to test it fairly
 
 **2. Preserve observations and make filtering reversible.** An early AI-assisted cleanup deleted headlines it judged irrelevant. I overruled that design and restored the affected rows from backup. The current ingestion path records source-distinct fetched observations and filter metadata before canonical deduplication. Keyword and low-LLM-relevance decisions create versioned exclusion-history rows; restoration timestamps the decision rather than erasing it. `clean` now excludes and re-aggregates. Permanent canonical-row deletion is available only through a direct database call with `confirm=True`, and raw observation rows survive with their link cleared.
 
-**3. Separate the baseline from weighting assumptions.** The primary predictive signal is now the arithmetic `simple_mean`. The session table also stores relevance-weighted, intensity-and-relevance-weighted, and legacy full-weighted variants. The full variant uses `max(abs(score), 0.10) * relevance * time_weight` under the current neutral source/category defaults. These are sensitivity specifications, not calibrated confidence adjustments, and no preferred variant is selected from the evaluation sample.
+**3. Separate the baseline from weighting assumptions.** The primary predictive signal is now the arithmetic `simple_mean`. The session table also stores relevance-weighted, intensity-and-relevance-weighted, and legacy full-weighted variants. The full variant uses `max(abs(score), 0.10) * relevance * time_weight` under the current neutral source/category defaults. These are sensitivity specifications, not calibrated confidence adjustments, and no preferred variant is selected from the evaluation sample. Its `event_count` is only the number of distinct bridge-linked event records present in the input, not a count of independently resolved real-world events.
 
 **4. Align news to when the market can react.** Publication timestamps are normalized to Europe/Istanbul and classified as `pre_open`, `during_session`, `post_close`, `weekend_or_holiday`, or `unknown`. Pre-open and in-session news maps to that trading session; post-close, non-trading-day, and unknown-time news rolls forward conservatively. The assignment is versioned and observes configured full holidays and half-day closes.
 
-**5. Keep processing failure distinct from neutral judgment.** A model result is stored only when an item is explicitly returned and validated. Missing or invalidated IDs remain NULL, move through configurable item-level retries, and end in `failed` after the configured attempt cap. An explicit zero-score neutral response remains a valid `scored` observation. Only complete `scored` rows without active exclusions enter aggregates.
+**5. Keep processing failure distinct from neutral judgment.** A model result is stored only when an item is explicitly returned and validated. Missing or invalidated IDs remain NULL, move through configurable item-level retries, and end in `failed` after the configured attempt cap. An explicit zero-score neutral response remains a valid `scored` observation. Only complete `scored` rows without active exclusions enter aggregates, and multiple eligible experiment identities are blocked from aggregation unless the operator supplies an explicit override.
 
 **6. Refuse to over-interpret.** Signal statistics are hidden until 30 eligible overlapping observations exist. Crossing that gate only permits **exploratory reporting**; it does not make an estimate reliable or validate a strategy. Next-session returns are formed on the complete ordered market-price series before signals are joined.
 
@@ -110,7 +110,7 @@ The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findi
 
 ![media polarization](docs/polarization.png)
 
-In the July analysis snapshot, pro-government/state outlets average **+0.11** and the sampled opposition outlet(s) **-0.09**, a descriptive gap of **+0.20** (unclustered *p* approximately 4 x 10^-24; Cohen's *d* = 0.74). A second scorer produced a similar directional gap. Same-story matching suggests story selection explains a substantial part of the aggregate gap; same-event framing is less precisely estimated. These are historical descriptive snapshot results, not a causal claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
+In the July analysis snapshot, pro-government/state outlets average **+0.11** and the sampled opposition outlet(s) **-0.09**: a descriptive gap of **+0.20** with a standardized effect size of **Cohen's d = 0.74**. Dependence-aware uncertainty is the relevant inferential frame because headlines share dates, outlets, and stories; the maintained analysis therefore reports date-cluster bootstrap intervals and clustered diagnostics rather than treating the naive unclustered *p*-value as leading evidence. Same-story comparisons suggest selection contributes substantially to the aggregate difference, while same-event framing is less precisely estimated because verified shared-event coverage is limited. These are historical, observational snapshot results—not a causal political-bias claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
 
 ## Run it
 
@@ -118,22 +118,24 @@ In the July analysis snapshot, pro-government/state outlets average **+0.11** an
 git clone https://github.com/amirremirr/Turkish-stock-market-sentiment-analysis.git
 cd Turkish-stock-market-sentiment-analysis
 
-pip install -r requirements.txt
-echo "OPENAI_API_KEY=sk-..." > .env
-
-run.bat run
+python -m pip install -r requirements.txt
+python -m scripts.demo --output-dir demo_output
 ```
 
-Set `SENTIMENT_BACKEND="xlmr"` for the offline fallback. The pipeline also runs unattended every weekday in GitHub Actions; `pull-cloud-db.bat` retrieves the latest data-branch snapshot.
+That path is fully offline after dependency installation. For a live pipeline run,
+copy `.env.example` to `.env`, supply the required provider credentials, and then
+run `run.bat run`. Set `SENTIMENT_BACKEND="xlmr"` for the offline scoring fallback.
+The pipeline also runs unattended every weekday in GitHub Actions;
+`pull-cloud-db.bat` retrieves the latest data-branch snapshot.
 
 Useful commands (`run.bat <cmd>` or `python main.py <cmd>`):
 
 | Command | What it does |
 |---|---|
-| `run` | Full pipeline end to end, with persisted final and component outcomes |
+| `run [--allow-mixed-experiments]` | Full pipeline end to end; the named override persists aggregation/final status as degraded when identities mix |
 | `status` / `dashboard` | Database health and a self-contained HTML dashboard |
 | `score` | Score eligible `pending` / `retry_pending` rows with omission-aware retries |
-| `aggregate` | Explicitly rebuild legacy descriptive tables and canonical session variants |
+| `aggregate [--allow-mixed-experiments]` | Explicitly rebuild derived tables; mixed experiment IDs block by default and require the named override |
 | `clean [--dry-run]` | Preview or store reversible off-topic exclusions; no raw row deletion |
 | `restore-exclusion ID` | Restore one active exclusion and rebuild aggregates |
 | `relabel` | Re-derive labels from stored backend-specific components |
@@ -146,9 +148,8 @@ Useful commands (`run.bat <cmd>` or `python main.py <cmd>`):
 Run the four-variant exploratory sensitivity report with:
 
 ```bash
-python -m analysis.prediction.sensitivity \
-  --db finance_sentiment.db \
-  --output outputs/signal_sensitivity.json
+python main.py aggregate --db finance_sentiment.db
+python -m analysis.prediction.sensitivity --db finance_sentiment.db --output outputs/signal_sensitivity.json
 ```
 
 `python evaluate.py` runs the read-only quality report. Its 30-observation threshold controls reporting only; it does not certify reliability.

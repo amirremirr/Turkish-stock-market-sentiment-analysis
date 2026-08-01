@@ -105,7 +105,8 @@ The canonical table is `daily_signal_variants`:
 | `relevance_weighted` | relevance-only weighted mean |
 | `intensity_relevance_weighted` | relevance times `max(abs(score), floor)` |
 | `full_weighted` | relevance x intensity x source x time x category; current neutral source/category defaults reproduce the historical relevance/intensity/time formula |
-| counts and shares | headline, positive, negative, neutral, unclassified, source, and event counts; label shares |
+| counts and shares | headline, positive, negative, neutral, unclassified, and source counts; label shares |
+| `event_count` | distinct bridge-linked `events.event_id` records represented in the input; not independently resolved real-world events |
 | audit statistics | population sentiment dispersion and each weighted denominator |
 
 The pure formula lives in `aggregation/signals.py`. Missing/non-finite scores are not observations; an explicit `0.0` score is. A zero weighted denominator returns NULL rather than falling back to the baseline.
@@ -117,7 +118,7 @@ Legacy/description tables are still rebuilt for compatibility:
 - `category_daily_sentiment`: publication-date full-weighted category description;
 - `category_sentiment_by_signal`: session-date unweighted category description.
 
-They are clearly separate from the canonical predictive table. `database.init_db()` applies schema migrations but does not invoke aggregation. Existing aggregates change only through an explicit aggregate-calling command.
+They are clearly separate from the canonical predictive table. `database.init_db()` applies schema migrations but does not invoke aggregation. Existing aggregates change only through an explicit aggregate-calling command. Before any rebuild mutation, aggregation identifies the experiment provenance of every eligible scored row. Multiple identities block by default. `--allow-mixed-experiments` is the only CLI override; a full run then persists aggregation and final status as `degraded`, together with the competing identities.
 
 ### 3.5 Market data and outputs
 
@@ -166,6 +167,7 @@ scoring_attempts
 last_scoring_attempt_at
 scoring_last_error
 score_components_kind
+experiment_id
 published_timestamp
 timing_bucket
 session_rule_version
@@ -174,7 +176,7 @@ signal_date
 relevance
 ```
 
-When `processing_status` is first added to a legacy database, complete historical score rows are classified `scored`, fully empty rows `pending`, and partial rows `retry_pending`. That classification runs only when the column is introduced, so later explicit state transitions are not overwritten. Component provenance is inferred conservatively from the stored model name. Session assignment is versioned and refreshed by aggregation; old rows without a recoverable time remain conservatively assigned as unknown-time observations.
+When `processing_status` is first added to a legacy database, complete historical score rows are classified `scored`, fully empty rows `pending`, and partial rows `retry_pending`. That classification runs only when the column is introduced, so later explicit state transitions are not overwritten. Component provenance is inferred conservatively from the stored model name. Historical scores keep a NULL `experiment_id`; aggregation represents each such legacy group with a model-scoped, visibly unassigned identity rather than inventing provenance. New scores receive the configured experiment ID. Session assignment is versioned and refreshed by aggregation; old rows without a recoverable time remain conservatively assigned as unknown-time observations.
 
 ### 4.4 Added pipeline-run columns
 
@@ -220,7 +222,7 @@ Regular close is 18:10; configured 2025-2026 half-days close at 13:00. The rule 
 
 ## 6. Run-status contract
 
-`pipeline.run_all()` persists a run even when a component raises. It records the active component as failed, skips components that were never attempted, saves structured issues, and re-raises the exception to the caller. A successful completion derives its final status from the component states:
+`pipeline.run_all()` persists a run even when a component raises. It records the active component as failed, skips components that were never attempted, saves structured issues, and re-raises the exception to the caller. A mixed-experiment default-policy block is stored as `mixed_experiments_blocked`; an explicit override is stored as `mixed_experiments_allowed` and degrades the aggregation component. A successful completion derives its final status from the component states:
 
 - any failed component -> `failed`;
 - otherwise any degraded component -> `degraded`;
@@ -234,10 +236,10 @@ Commands run as `python main.py <command>` or, on Windows, `run.bat <command>`.
 
 | Command | Current behavior |
 |---|---|
-| `run` | scrape, score, aggregate, prices/context, plot, and persist component outcomes |
+| `run [--allow-mixed-experiments]` | scrape, score, aggregate, prices/context, plot, and persist component outcomes; an override-assisted mix is degraded |
 | `scrape` | fetch observations, including exclusion metadata, and insert raw/canonical records |
 | `score` | process eligible pending/retry rows with missing-only retries |
-| `aggregate` | explicitly rebuild all legacy and canonical derived signal tables |
+| `aggregate [--allow-mixed-experiments]` | explicitly rebuild all derived signal tables; multiple eligible experiment identities block unless overridden |
 | `recategorize [--llm]` | refresh topics; LLM mode retries missing analyses, updates relevance/exclusions, and aggregates |
 | `relabel` | derive labels from stored backend-specific compatibility components |
 | `prices` | fetch BIST 100 prices with cache-freshness outcome logic |
@@ -256,9 +258,8 @@ Commands run as `python main.py <command>` or, on Windows, `run.bat <command>`.
 The sensitivity command is a package entry point rather than a `main.py` subcommand:
 
 ```bash
-python -m analysis.prediction.sensitivity \
-  --db finance_sentiment.db \
-  --output outputs/signal_sensitivity.json
+python main.py aggregate --db finance_sentiment.db
+python -m analysis.prediction.sensitivity --db finance_sentiment.db --output outputs/signal_sensitivity.json
 ```
 
 It reports variant correlations, directional agreement, distributions, alignment audit rows, and next-session exploratory metrics as strict JSON.
