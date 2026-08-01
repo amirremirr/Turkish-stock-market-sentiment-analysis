@@ -346,3 +346,148 @@ def test_run_all_fails_when_every_scoring_candidate_exhausts(stage2_db, monkeypa
     assert run["status"] == "failed"
     assert run["scoring_status"] == "failed"
     assert any(issue["code"] == "scoring_unavailable" for issue in run["errors"])
+
+
+def test_run_all_full_success_persists_every_component(stage2_db, monkeypatch):
+    calls = []
+
+    class SuccessfulRSS:
+        def __init__(self, session):
+            calls.append("rss_init")
+            self.source_status = {"feed-a": "ok"}
+
+        def scrape_all(self, since):
+            calls.append("rss_scrape")
+            return [{
+                "source": "feed-a",
+                "title": "BIST tam entegrasyon haberi",
+                "url": "https://example.test/run-all-success",
+                "published_at": date.today(),
+                "published_hour": 9,
+                "category": "bist_company",
+            }]
+
+    class UnexpectedHTML:
+        def __init__(self, session):
+            raise AssertionError("HTML fallback must not run after RSS success")
+
+    class SuccessfulScorer:
+        model_name = "gpt-integration/p3"
+        score_components_kind = "synthetic_compatibility"
+        max_scoring_attempts = 1
+
+        def analyze_partial(self, titles):
+            calls.append("score")
+            assert titles == ["BIST tam entegrasyon haberi"]
+            return {0: _analysis("positive", 0.6)}
+
+    market_index = pd.to_datetime(["2026-07-30", "2026-07-31"])
+    market_frame = pd.DataFrame(
+        {
+            "Open": [100.0, 101.0],
+            "High": [102.0, 103.0],
+            "Low": [99.0, 100.0],
+            "Close": [101.0, 102.0],
+            "Volume": [1_000.0, 1_100.0],
+        },
+        index=market_index,
+    )
+
+    def successful_download(symbol, **kwargs):
+        calls.append(f"download:{symbol}")
+        return market_frame.copy()
+
+    def successful_fx(**kwargs):
+        calls.append("fx")
+        return pipeline.StepOutcome(count=2, status="success")
+
+    def successful_plot(**kwargs):
+        calls.append("plot")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(pipeline.sc, "_make_session", lambda: object())
+    monkeypatch.setattr(pipeline.sc, "RSSFeedScraper", SuccessfulRSS)
+    monkeypatch.setattr(pipeline.sc, "InvestingTRScraper", UnexpectedHTML)
+    monkeypatch.setattr(pipeline, "_get_scorer", lambda: SuccessfulScorer())
+    monkeypatch.setattr(pipeline.yf, "download", successful_download)
+    monkeypatch.setattr(pipeline, "fx_rates_step", successful_fx)
+    monkeypatch.setattr(pipeline, "plot_step", successful_plot)
+
+    result = pipeline.run_all(
+        lookback_days=10,
+        db_path=stage2_db,
+        output_path="integration-output.png",
+        show_plot=False,
+    )
+
+    assert result["status"] == "success"
+    assert result["components"] == {
+        "scrape": "success",
+        "scoring": "success",
+        "aggregation": "success",
+        "market_data": "success",
+        "audit": "success",
+    }
+    assert result["headlines_scraped"] == 1
+    assert result["headlines_scored"] == 1
+    assert result["prices_added"] == 2
+    assert result["sentiment_days"] == 1
+    assert {"rss_init", "rss_scrape", "score", "fx", "plot"} <= set(calls)
+    assert len([call for call in calls if call.startswith("download:")]) >= 2
+
+    run = db.get_pipeline_run(result["run_id"], stage2_db)
+    assert run["status"] == "success"
+    assert run["finished_at"] is not None
+    assert run["warnings"] == []
+    assert run["errors"] == []
+    assert run["headlines_scraped"] == 1
+    assert run["headlines_scored"] == 1
+    assert run["prices_added"] == 2
+    assert run["sentiment_days"] == 1
+
+
+def test_run_all_full_ingestion_failure_persists_failed_and_skipped_states(
+    stage2_db, monkeypatch,
+):
+    class FailedRSS:
+        def __init__(self, session):
+            self.source_status = {
+                "feed-a": "failed: timeout",
+                "feed-b": "failed: HTTP 503",
+            }
+
+        def scrape_all(self, since):
+            return []
+
+    class FailedHTML:
+        def __init__(self, session):
+            pass
+
+        def scrape(self, max_pages):
+            return []
+
+    monkeypatch.setattr(pipeline.sc, "_make_session", lambda: object())
+    monkeypatch.setattr(pipeline.sc, "RSSFeedScraper", FailedRSS)
+    monkeypatch.setattr(pipeline.sc, "InvestingTRScraper", FailedHTML)
+
+    with pytest.raises(
+        RuntimeError, match="ingestion failed across all configured paths"
+    ):
+        pipeline.run_all(db_path=stage2_db, show_plot=False)
+
+    with db._conn(stage2_db) as con:
+        run_id = con.execute("SELECT MAX(run_id) FROM pipeline_runs").fetchone()[0]
+    run = db.get_pipeline_run(run_id, stage2_db)
+
+    assert run["status"] == "failed"
+    assert run["scrape_status"] == "failed"
+    assert run["scoring_status"] == "skipped"
+    assert run["aggregation_status"] == "skipped"
+    assert run["market_data_status"] == "skipped"
+    assert run["audit_status"] == "skipped"
+    assert run["headlines_scraped"] == 0
+    assert run["headlines_scored"] == 0
+    assert run["prices_added"] == 0
+    assert run["sentiment_days"] == 0
+    assert any(issue["code"] == "all_sources_failed" for issue in run["errors"])
+    assert any(issue["code"] == "component_exception" for issue in run["errors"])
