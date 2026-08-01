@@ -23,6 +23,7 @@ import json
 import math
 import re
 import sqlite3
+import sys
 import unicodedata
 import warnings
 from pathlib import Path
@@ -1141,6 +1142,12 @@ def format_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _console_safe(text: str, encoding: str | None = None) -> str:
+    """Preserve UTF-8 output and escape only unsupported console characters."""
+    active_encoding = encoding or getattr(sys.stdout, "encoding", None) or "utf-8"
+    return text.encode(active_encoding, errors="backslashreplace").decode(active_encoding)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Observational selection-versus-framing polarization analysis"
@@ -1168,7 +1175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         minimum_shared_tokens=args.minimum_shared_tokens,
         match_window_days=args.match_window_days,
     )
-    print(format_report(report))
+    print(_console_safe(format_report(report)))
     if args.json_output is not None:
         args.json_output.write_text(
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

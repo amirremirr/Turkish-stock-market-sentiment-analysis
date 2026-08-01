@@ -22,6 +22,15 @@ def _analyze(rows, **kwargs):
     )
 
 
+def test_console_output_escapes_only_characters_unsupported_by_active_encoding():
+    text = "kayıp ölçüm"
+
+    assert inference._console_safe(text, "utf-8") == text
+    cp1252_safe = inference._console_safe(text, "cp1252")
+    assert cp1252_safe == "kay\\u0131p ölçüm"
+    cp1252_safe.encode("cp1252", errors="strict")
+
+
 def test_exact_descriptives_effect_size_and_cluster_bootstrap_are_deterministic():
     rows = [
         {"source": "pro_a", "date": "2026-01-01", "sentiment": 1.0, "category": "macro", "title": "a"},
