@@ -1,5 +1,10 @@
 # ── Data files ────────────────────────────────────────────────────────────────
 finance_sentiment.db
+# Verification/migration snapshots. The canonical database is recoverable from
+# the data branch (git show origin/data:finance_sentiment.db), so these local
+# copies are redundant blob. The three historical backups predating this rule
+# stay tracked; ignoring a path does not untrack what is already committed.
+backups/*.db
 *.png
 !docs/*.png
 labels_to_validate*.csv

@@ -65,6 +65,15 @@ jobs:
             git push origin HEAD:main
           fi
 
+      # The next step force-pushes an orphan commit, so a stale database would
+      # overwrite newer production state with no history to recover from.
+      # Refuse the push instead of discovering the loss later.
+      - name: Guard against publishing a stale snapshot
+        run: |
+          git fetch origin data:refs/remotes/origin/data || true
+          python -m scripts.guard_db_snapshot finance_sentiment.db \
+            --reference-git origin/data
+
       - name: Persist DB + chart to data branch
         run: |
           git config user.name  "github-actions[bot]"
