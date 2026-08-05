@@ -1,10 +1,18 @@
-# Phase 0 — Production migration verification report
+# Phase 0 — Production migration verification and deployment report
 
-Date: 2026-08-06 · Scope: verification only · **The canonical production
-database has not been migrated or pushed.** Everything below was produced on
-throwaway copies.
+This report has two parts, recorded in the order they happened. Do not read the
+first as describing the second.
 
-Reproduce with:
+| Part | Date | Scope |
+|---|---|---|
+| **§§1–12 — verification** | 2026-08-06 | Copy-only. Nothing was migrated in place and nothing was pushed. Every figure came from throwaway copies. |
+| **§13 — deployment** | 2026-08-06, later same day | The canonical production database was migrated and published to the `data` branch after the verification passed. |
+
+Sections 1–12 are preserved as written at verification time. Statements there
+such as "nothing was pushed" describe that stage, not the current state; §13
+records what changed at deployment.
+
+Reproduce the verification with:
 
 ```
 python -m scripts.verify_migration backups/phase0_canonical_data_2026-07-31.db
@@ -448,15 +456,127 @@ remains at `b1ffde7`.
 
 ---
 
-## 12. Not done in Phase 0
+## 12. Not done at verification time
+
+**State as of the verification stage only.** §13 supersedes the first three
+entries; the last two still hold.
 
 - The canonical database was **not** migrated in place. Both the schema and
-  provenance migrations were exercised only on copies.
-- Nothing was pushed to `origin/data` or `main`.
+  provenance migrations were exercised only on copies. *(Superseded by §13.)*
+- Nothing was pushed to `origin/data` or `main`. *(Superseded by §13.)*
 - `aggregate_step` was run only on a throwaway copy, to prove the mixed-identity
-  blocker is resolved. No production derived table was built.
+  blocker is resolved. No production derived table was built. *(Superseded by
+  §13.)*
 - The workflow remains disabled; the guard step is added but untested against a
-  live run.
+  live run. **Still true.**
 - No Phase A feature work was started. The `signal_family` taxonomy — including
   the approved `banking_financial_sector` family — is **recorded** in
-  [ROADMAP.md](../ROADMAP.md) but not implemented.
+  [ROADMAP.md](../ROADMAP.md) but not implemented. **Still true.**
+
+---
+
+## 13. Deployment completed — 2026-08-06
+
+The verification in §§1–12 passed, and the canonical production database was
+subsequently migrated and published. This section records that deployment; it
+did not happen during the verification stage above.
+
+### Source and result
+
+| | Before | After |
+|---|---|---|
+| `origin/data` commit | `b1ffde7cdd33ef3ffafbd7976af1777f7113b9b2` (2026-07-31T09:23Z) | `da703ba1e54e75ad01dd00eea354e444d97b054a` (2026-08-06) |
+| Database SHA-256 | `90e3ec76d5e351d1d9ab31928c50e9d6c7e44d5a6b31172e6ec660ff3d8649ac` | `01c271b71bed70a7be96c715701b506ab6fa93e52bc7e95655918f5719bb1e81` |
+| Size | 3 006 464 bytes | 4 911 104 bytes |
+
+`origin/data` was confirmed still at `b1ffde7` immediately before the operation,
+and that fetched copy — not the stale working-tree database — was the sole
+production source. The pre-migration file was backed up to
+`backups/production_pre_migration_2026-08-06.db` (hash as above, gitignored and
+uncommitted), and all migration work ran on a separate copy.
+
+**The published snapshot was fetched back and re-hashed: the remote hash matched
+the local migrated hash exactly.**
+
+### What the migration did
+
+| Change | Count |
+|---|---|
+| Historical rows given reviewed experiment identity `v1-p3` | **3 465** |
+| Append-only provenance audit records created | **3 465** |
+| Reversible low-relevance exclusions created | **272** |
+| Session assignments corrected | **41** |
+
+Every corrected session date was verified to be a real trading day with an
+actual price row. No headline was deleted; every exclusion is active and
+reversible.
+
+### Verified invariants
+
+- 3 465 historical headlines preserved.
+- Score digest `fd3a7516a47f695a95a47966f603530a31690d94b3754409fe34a9a2c3d4eed8`
+  identical before the migration, after every stage, and on the fetched-back
+  remote copy — no `sentiment_score`, `sentiment_label`, `scored_at` or
+  `model_name` was rewritten.
+- `experiment_id = 'v1-p3'` on 3 465 rows, 0 remaining NULL, 0 blocked.
+- A second `init_db()` was a content no-op.
+
+### Aggregation
+
+`aggregate_step` ran with **no** `--allow-mixed-experiments` override:
+
+```
+status=success   sessions=70   warnings=[]
+eligible_experiment_ids=['v1-p3']
+mixed_experiments=False   mixed_experiments_override=False
+```
+
+`daily_signal_variants` 70 rows, `category_sentiment_by_signal` 416 rows.
+Headline, event, price, factor, FX and run counts unchanged.
+
+### Publication method
+
+The snapshot is an orphan commit holding `finance_sentiment.db` plus the
+pre-existing `sentiment_vs_bist100.png` blob carried over byte-identical from
+`b1ffde7`. The commit was assembled with git plumbing against a temporary index
+rather than `git checkout --orphan`, so the working tree and `HEAD` were never
+touched — the documented procedure's result without disturbing unrelated
+uncommitted work. `sentiment_vs_bist100.png` was preserved rather than dropped:
+deleting it on a force-pushed branch would destroy it irrecoverably.
+
+### Still true after deployment
+
+- **The scheduled workflow remains disabled** (`disabled_manually`).
+- **No live scrape or scoring run has occurred.** The published database
+  contains no data collected after 2026-07-31.
+- The pre-migration backup remains available locally and uncommitted, and the
+  pre-migration commit `b1ffde7` remains available for rollback.
+
+---
+
+## 14. Known unresolved issue — incomplete 2026-07-31 price bar
+
+**This predates the migration.** It was present in the canonical `b1ffde7`
+snapshot and was neither introduced nor corrected by the deployment.
+
+The `bist100_prices` row for **2026-07-31** was captured during the trading
+session, not after it:
+
+| Symptom | Detail |
+|---|---|
+| Capture time | pipeline run 52 started 2026-07-31T09:22Z = 12:22 Istanbul, mid-session (BIST closes 18:10) |
+| Volume | **0.0** — the only such row in the table |
+| Stored close | 13 251.72 |
+| Completed daily close | 13 458.10 (live provider), a **1.53%** difference |
+
+The stored value is an intraday snapshot recorded as if it were a daily close,
+so the 2026-07-31 close, its daily return, and any return computed into or out
+of that session are wrong.
+
+Sentiment aggregates are unaffected: `aggregate_step` reads only headlines, so
+`daily_signal_variants` and the category tables do not depend on this row.
+
+**This row must be refreshed before any price-based analysis uses that session**,
+and daily-bar completeness must be enforced before the scheduled workflow is
+re-enabled — otherwise every run started at 06:30 UTC will write another
+mid-session bar for the current day.
