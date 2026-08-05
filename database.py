@@ -355,6 +355,12 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("headlines", "relevance",      "REAL"),     # LLM relevance grade 0.0-1.0 (NULL = ungraded -> 1.0)
     ("headlines", "signal_date",    "TEXT"),     # first trading session that can react (trading_calendar.signal_date)
     ("events",    "external_id",    "TEXT"),     # e.g. 'kap:1230800' — dedup for non-headline events
+    # Daily-bar completeness (see price_bars.py). NULL means unclassified; the
+    # backfill resolves historical rows from recorded run times.
+    ("bist100_prices", "bar_status",       "TEXT"),
+    ("bist100_prices", "bar_observed_at",  "TEXT"),
+    ("bist100_prices", "bar_review_reason", "TEXT"),
+    ("bist100_prices", "bar_rule_version", "TEXT"),
 ]
 
 
@@ -1640,31 +1646,168 @@ def permanently_delete_headlines(
 
 # -- BIST 100 prices -----------------------------------------------------------
 
-def upsert_prices(df: pd.DataFrame, db_path: str = DB_PATH) -> None:
+def upsert_prices(
+    df: pd.DataFrame,
+    db_path: str = DB_PATH,
+    *,
+    observed_at: Optional[str] = None,
+    mark_corrected: bool = False,
+) -> Dict[str, int]:
     """
     Upsert a price DataFrame into bist100_prices.
     ``df`` must have columns: date, open, high, low, close, volume, daily_return
     (all strings / floats - no DatetimeIndex).
+
+    Each bar is classified for completeness before it is written. A bar
+    observed while its session was still open is stored as provisional, and a
+    provisional refetch never demotes an already-settled bar: completeness only
+    moves forward. ``mark_corrected`` records that a settled bar deliberately
+    replaced a provisional or invalid one.
+
+    Returns counts by outcome so a caller can report what actually changed.
     """
-    rows = [
-        (row.date, row.open, row.high, row.low, row.close, row.volume, row.daily_return)
-        for row in df.itertuples(index=False)
-    ]
+    from config import PRICE_BAR_RULE_VERSION
+    from price_bars import (
+        STATUS_COMPLETE,
+        STATUS_CORRECTED,
+        classify_price_bar,
+        may_replace,
+    )
+
+    observed = observed_at or _now_iso()
+    counts = {"written": 0, "skipped_would_demote": 0, "provisional": 0,
+              "complete": 0, "provider_invalid": 0, "corrected": 0}
+
     with _conn(db_path) as con:
-        con.executemany(
-            """INSERT OR REPLACE INTO bist100_prices
-               (date, open, high, low, close, volume, daily_return)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            rows,
-        )
-    logger.info("Upserted %d price rows", len(rows))
+        existing = {
+            row["date"]: row["bar_status"]
+            for row in con.execute("SELECT date, bar_status FROM bist100_prices")
+        }
+        payload = []
+        for row in df.itertuples(index=False):
+            classification = classify_price_bar(
+                row.date, volume=row.volume, observed_at=observed
+            )
+            status = classification.status
+            if (
+                mark_corrected
+                and status == STATUS_COMPLETE
+                and existing.get(row.date) not in (None, STATUS_COMPLETE, STATUS_CORRECTED)
+            ):
+                status = STATUS_CORRECTED
+            if not may_replace(existing.get(row.date), status):
+                counts["skipped_would_demote"] += 1
+                continue
+            counts[status] = counts.get(status, 0) + 1
+            counts["written"] += 1
+            payload.append((
+                row.date, row.open, row.high, row.low, row.close, row.volume,
+                row.daily_return, status, observed,
+                classification.review_reason, PRICE_BAR_RULE_VERSION,
+            ))
+
+        if payload:
+            con.executemany(
+                """INSERT OR REPLACE INTO bist100_prices
+                   (date, open, high, low, close, volume, daily_return,
+                    bar_status, bar_observed_at, bar_review_reason,
+                    bar_rule_version)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                payload,
+            )
+    logger.info(
+        "Upserted %d price rows (%d skipped to avoid demoting a settled bar)",
+        counts["written"], counts["skipped_would_demote"],
+    )
+    return counts
+
+
+def backfill_price_bar_status(db_path: str = DB_PATH) -> Dict[str, int]:
+    """Classify stored bars that predate completeness tracking.
+
+    Settlement is established from recorded evidence rather than assumed: a
+    price fetch downloads the whole lookback window, so any run that started
+    after a session settled has already refreshed that session's bar. The
+    latest run start is therefore the observation time for every stored bar.
+
+    With no run history the settlement time cannot be established and rows stay
+    provisional, which is the safe direction -- an unverifiable bar is withheld
+    from analysis rather than trusted.
+    """
+    from config import PRICE_BAR_RULE_VERSION
+    from price_bars import classify_price_bar
+
+    with _conn(db_path) as con:
+        latest_run = con.execute(
+            "SELECT MAX(started_at) FROM pipeline_runs"
+        ).fetchone()[0]
+        rows = con.execute(
+            "SELECT date, volume FROM bist100_prices "
+            "WHERE COALESCE(bar_rule_version, '') <> ?",
+            (PRICE_BAR_RULE_VERSION,),
+        ).fetchall()
+
+        counts: Dict[str, int] = {"classified": 0, "flagged_for_review": 0}
+        updates = []
+        for row in rows:
+            classification = classify_price_bar(
+                row["date"], volume=row["volume"], observed_at=latest_run
+            )
+            counts[classification.status] = counts.get(classification.status, 0) + 1
+            counts["classified"] += 1
+            if classification.needs_review:
+                counts["flagged_for_review"] += 1
+            updates.append((
+                classification.status, latest_run,
+                classification.review_reason, PRICE_BAR_RULE_VERSION, row["date"],
+            ))
+        if updates:
+            con.executemany(
+                """UPDATE bist100_prices
+                   SET bar_status=?, bar_observed_at=?, bar_review_reason=?,
+                       bar_rule_version=?
+                   WHERE date=?""",
+                updates,
+            )
+    logger.info("Classified %d price bars", counts["classified"])
+    return counts
+
+
+def list_price_bars_for_review(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Return bars carrying a data-quality flag or withheld from analysis."""
+    from price_bars import ANALYSABLE_STATUSES
+
+    placeholders = ",".join("?" * len(ANALYSABLE_STATUSES))
+    with _conn(db_path) as con:
+        rows = con.execute(
+            f"""SELECT date, close, volume, bar_status, bar_review_reason,
+                       bar_observed_at
+                FROM bist100_prices
+                WHERE bar_review_reason IS NOT NULL
+                   OR COALESCE(bar_status, '') NOT IN ({placeholders})
+                ORDER BY date""",
+            ANALYSABLE_STATUSES,
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_prices(
     start: Optional[str] = None,
     end: Optional[str] = None,
     db_path: str = DB_PATH,
+    *,
+    complete_only: bool = True,
 ) -> pd.DataFrame:
+    """Return stored daily bars, settled bars only by default.
+
+    Return construction must not consume a bar captured mid-session, so
+    provisional and provider-invalid rows are withheld unless a caller asks for
+    them explicitly. Rows predating completeness tracking have a NULL status and
+    are also withheld, since an unclassified bar is not a verified one; run
+    :func:`backfill_price_bar_status` to resolve them.
+    """
+    from price_bars import ANALYSABLE_STATUSES
+
     where, params = [], []
     if start:
         where.append("date >= ?")
@@ -1672,6 +1815,10 @@ def get_prices(
     if end:
         where.append("date <= ?")
         params.append(end)
+    if complete_only:
+        placeholders = ",".join("?" * len(ANALYSABLE_STATUSES))
+        where.append(f"bar_status IN ({placeholders})")
+        params.extend(ANALYSABLE_STATUSES)
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     with _conn(db_path) as con:
         return pd.read_sql_query(

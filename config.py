@@ -374,6 +374,16 @@ BIST_HALF_DAYS = {
 }
 TRADING_CALENDAR_RULE_VERSION = "bist-official-calendar-2025-2026-v2"
 
+# -- Daily price-bar completeness ----------------------------------------------
+# The scheduled run fires at 06:30 UTC, hours before the 18:10 Istanbul close,
+# so a same-day price fetch returns an intraday snapshot rather than that day's
+# daily bar. Bars observed before the close plus this delay are stored as
+# provisional and excluded from analysis until a later fetch settles them.
+# The delay covers the gap between the closing bell and the provider publishing
+# the final bar; 30 minutes is comfortably past observed yfinance behaviour.
+PRICE_BAR_SETTLEMENT_MINUTES = 30
+PRICE_BAR_RULE_VERSION = "bist-daily-bar-completeness-v1"
+
 # -- Quality gates -------------------------------------------------------------
 # Minimum trading-day overlap (sentiment rows that have a matching price row)
 # required before exploratory signal statistics are displayed. This is a

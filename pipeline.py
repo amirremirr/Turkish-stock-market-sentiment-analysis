@@ -745,13 +745,47 @@ def prices_step(
     )
     df = df.dropna(subset=["close"])
 
-    db.upsert_prices(df, db_path=db_path)
-    logger.info("Stored %d price rows for %s", len(df), ticker)
-    outcome = StepOutcome(
-        count=len(df), status="success",
-        details={"ticker": ticker, "downloaded_rows": len(df)},
+    # Bars are classified against the fetch time, so a run started before the
+    # Istanbul close stores today's row as provisional instead of passing an
+    # intraday snapshot off as that session's daily bar.
+    counts = db.upsert_prices(df, db_path=db_path)
+    db.backfill_price_bar_status(db_path=db_path)
+    flagged = db.list_price_bars_for_review(db_path=db_path)
+
+    price_warnings: List[Dict[str, Any]] = []
+    price_status = "success"
+    if counts.get("provisional"):
+        price_warnings.append(_issue(
+            "market_data", "provisional_price_bar",
+            "Session had not settled at fetch time; bar stored as provisional "
+            "and withheld from analysis until a later run confirms it",
+            provisional_rows=counts["provisional"],
+        ))
+    if flagged:
+        price_status = "degraded"
+        price_warnings.append(_issue(
+            "market_data", "price_bars_need_review",
+            "Stored bars carry a completeness or volume flag",
+            rows=[
+                {"date": row["date"], "status": row["bar_status"],
+                 "reason": row["bar_review_reason"]}
+                for row in flagged[:10]
+            ],
+            flagged_total=len(flagged),
+        ))
+
+    logger.info(
+        "Stored %d price rows for %s (%d provisional, %d flagged for review)",
+        counts["written"], ticker, counts.get("provisional", 0), len(flagged),
     )
-    return outcome if return_outcome else len(df)
+    outcome = StepOutcome(
+        count=counts["written"], status=price_status, warnings=price_warnings,
+        details={
+            "ticker": ticker, "downloaded_rows": len(df),
+            "bar_counts": counts, "flagged_for_review": len(flagged),
+        },
+    )
+    return outcome if return_outcome else counts["written"]
 
 
 def _market_data_fallback_outcome(db_path: str, reason: str) -> StepOutcome:
