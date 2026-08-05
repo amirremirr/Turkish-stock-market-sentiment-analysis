@@ -127,6 +127,42 @@ The current incremental boundaries and compatibility-entry-point policy are docu
 - emits `signal_results.csv`, `audit.json`, and `signal_variants.png`;
 - is regression-tested without a key, network, model load, or private database.
 
+## Phase 0 - Production reconciliation - completed
+
+Completed 2026-08-06, verification only; the canonical database was not migrated in place and nothing was pushed. See [docs/PHASE0_MIGRATION_REPORT.md](docs/PHASE0_MIGRATION_REPORT.md).
+
+- confirmed the scheduled workflow disabled and established `origin/data` as the frozen canonical snapshot;
+- identified why the last three cloud runs failed: post-migration scoring produced a second experiment identity and `aggregate_step` correctly refused to run;
+- verified the additive migration on copies of both databases against ten gates, with the historical-score digest constant at every stage;
+- recorded two reviewed deviations: 41 `signal_date` values re-derived under the corrected trading calendar, and 272 reversible low-relevance exclusions;
+- added a production-shaped legacy fixture, a reusable migration verifier, and a guard refusing publication of a stale snapshot;
+- resolved legacy score provenance through a reviewed, audited, reversible migration.
+
+## Approved decisions pending Phase A implementation
+
+These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**
+
+### Signal-family taxonomy: banking
+
+`banking_financial_sector` is a distinct signal family. Banking headlines are not folded into `company_kap`.
+
+| Family | Scope |
+|---|---|
+| `banking_financial_sector` | Sector- or system-level banking news: credit growth, deposit rates, banking regulation and BDDK decisions, lending conditions, sector capital and liquidity, sector-wide profitability, systemic commentary, broad banking-sector or banking-index developments |
+| `company_kap` | A named listed company, including a listed bank: earnings, dividends, capital increases, acquisitions, material company events, company-specific KAP disclosures |
+
+The boundary is **entity specificity, not industry**. A named bank's earnings release is `company_kap`; "banking sector loan growth slows" is `banking_financial_sector`. Because the rule keys on whether a specific listed entity is named, it applies uniformly across sectors instead of special-casing banks.
+
+Ambiguous cases must be reported in a coverage table. They must never be silently forced into either family.
+
+### Other settled decisions
+
+- `market_recap` is a separate versioned rules-based column, not a new LLM category; no prompt change and no LLM reclassification occurs in Phase A;
+- the existing overall `daily_signal_variants` table remains unchanged; domestic-only and family-specific aggregates are separate tables;
+- during-session headlines stay available descriptively but are ineligible for execution-sensitive prediction until intraday prices exist;
+- GDELT and Google Trends are excluded from v1 control sets;
+- scikit-learn is not added; baselines use numpy/statsmodels.
+
 ## Predictive decision rule
 
 No result becomes a finding merely because 30 observations are available. A predictive conclusion requires a pre-specified variant and target, chronological out-of-sample evaluation, controls, transaction costs, multiple-testing discipline, and enough independent evaluation windows to characterize uncertainty. A null result is acceptable. No parameter should be tuned after observing an appealing in-sample result.
