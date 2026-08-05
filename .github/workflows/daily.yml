@@ -11,7 +11,12 @@ name: daily-pipeline
 on:
   schedule:
     - cron: "30 6 * * 1-5"     # 06:30 UTC ≈ 09:30 Istanbul, Mon–Fri (pre-open)
-  workflow_dispatch: {}         # manual "Run workflow" button for testing
+  workflow_dispatch:            # manual "Run workflow" button for testing
+    inputs:
+      publish_chart:
+        description: "Refresh docs/sample_output.png and commit it to main"
+        type: boolean
+        default: true
 
 permissions:
   contents: write               # default GITHUB_TOKEN may push the data branch
@@ -52,7 +57,12 @@ jobs:
           SENTIMENT_BACKEND: llm
         run: python main.py run --no-show
 
+      # Scheduled runs always publish. Only a manual dispatch can opt out, so a
+      # rehearsal run can exercise the pipeline without committing a refreshed
+      # figure. The event check comes first because the inputs context is empty
+      # on a schedule, where an empty value would otherwise read as false.
       - name: Publish latest chart to README
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_chart
         run: |
           cp sentiment_vs_bist100.png docs/sample_output.png
           git config user.name  "github-actions[bot]"
