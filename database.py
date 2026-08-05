@@ -262,6 +262,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_headline_exclusions_one_active
 CREATE INDEX IF NOT EXISTS idx_headline_exclusions_history
     ON headline_exclusions(headline_id, excluded_at);
 
+-- Reviewed reconstruction of legacy score provenance. Append-only by trigger:
+-- an assignment and a later rollback are two rows, never an edit of one, so the
+-- reconstruction history of any headline stays readable after the fact.
+-- assigned_experiment_id is NULL on a rollback row.
+CREATE TABLE IF NOT EXISTS experiment_assignment_audit (
+    assignment_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    headline_id            INTEGER NOT NULL REFERENCES headlines(id),
+    assigned_experiment_id TEXT,
+    assignment_method      TEXT NOT NULL,
+    evidence               TEXT NOT NULL,
+    reviewed_at            TEXT NOT NULL,
+    migration_version      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_assignment_audit_headline
+    ON experiment_assignment_audit(headline_id, assignment_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_experiment_assignment_audit_no_update
+BEFORE UPDATE ON experiment_assignment_audit
+BEGIN
+    SELECT RAISE(ABORT, 'experiment_assignment_audit is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_experiment_assignment_audit_no_delete
+BEFORE DELETE ON experiment_assignment_audit
+BEGIN
+    SELECT RAISE(ABORT, 'experiment_assignment_audit is append-only');
+END;
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -998,9 +1026,11 @@ def batch_update_sentiment(
 def get_eligible_experiment_ids(db_path: str = DB_PATH) -> List[str]:
     """Return distinct score-experiment identities eligible for aggregation.
 
-    Historical rows predate per-score experiment provenance. They remain NULL
-    and are represented conservatively by a clearly marked model-scoped legacy
-    identity; migration never invents an experiment assignment for them.
+    Experiment identity is never guessed. Legacy identity may be reconstructed
+    only when stored evidence uniquely establishes it, and the reconstruction is
+    recorded auditably -- see :func:`backfill_reviewed_legacy_experiment_id`.
+    A row that has not been through that reviewed migration keeps NULL and is
+    represented here by a clearly marked model-scoped legacy identity.
     """
     with _conn(db_path) as con:
         rows = con.execute(
@@ -1027,6 +1057,284 @@ def get_eligible_experiment_ids(db_path: str = DB_PATH) -> List[str]:
                ORDER BY eligible_experiment_id"""
         ).fetchall()
     return [str(row["eligible_experiment_id"]) for row in rows]
+
+
+# -- Reviewed legacy experiment provenance -------------------------------------
+
+# A row qualifies only when every clause holds. Anything else is left NULL and
+# keeps blocking aggregation, which is the safe direction: an unassigned row is
+# visible, a wrongly assigned one is not.
+_REVIEWED_LEGACY_ELIGIBLE_SQL = """
+    sentiment_score IS NOT NULL
+AND processing_status = 'scored'
+AND model_name = :model_name
+AND sentiment_label IS NOT NULL
+AND scored_at IS NOT NULL
+AND p_positive IS NOT NULL
+AND p_neutral IS NOT NULL
+AND p_negative IS NOT NULL
+AND (score_components_kind IS NULL OR score_components_kind IN ({kinds}))
+AND TRIM(COALESCE(experiment_id, '')) = ''
+"""
+
+
+def _reviewed_legacy_params() -> Tuple[str, Dict[str, Any]]:
+    """Build the eligibility clause and its bound parameters from config."""
+
+    from config import REVIEWED_LEGACY_COMPONENT_KINDS, REVIEWED_LEGACY_MODEL_NAME
+
+    kinds = list(REVIEWED_LEGACY_COMPONENT_KINDS)
+    placeholders = ", ".join(f":kind_{index}" for index in range(len(kinds)))
+    params: Dict[str, Any] = {"model_name": REVIEWED_LEGACY_MODEL_NAME}
+    for index, kind in enumerate(kinds):
+        params[f"kind_{index}"] = kind
+    return _REVIEWED_LEGACY_ELIGIBLE_SQL.format(kinds=placeholders), params
+
+
+def survey_reviewed_legacy_candidates(db_path: str = DB_PATH) -> Dict[str, Any]:
+    """Classify unassigned scored rows without changing anything.
+
+    ``blocked`` counts rows that still lack provenance after this migration
+    would run. They are reported by reason so a conflicting scorer identity is
+    an explicit finding rather than a silent omission.
+    """
+
+    from config import REVIEWED_LEGACY_EXPERIMENT_ID, REVIEWED_LEGACY_MODEL_NAME
+
+    clause, params = _reviewed_legacy_params()
+    with _conn(db_path) as con:
+        eligible = int(
+            con.execute(
+                f"SELECT COUNT(*) FROM headlines WHERE {clause}", params
+            ).fetchone()[0]
+        )
+        already_assigned = int(
+            con.execute(
+                "SELECT COUNT(*) FROM headlines "
+                "WHERE TRIM(COALESCE(experiment_id, '')) <> ''"
+            ).fetchone()[0]
+        )
+        blocked_rows = con.execute(
+            f"""SELECT COALESCE(model_name, '<null>') AS model_name,
+                       COUNT(*) AS n
+                FROM headlines
+                WHERE sentiment_score IS NOT NULL
+                  AND TRIM(COALESCE(experiment_id, '')) = ''
+                  AND NOT ({clause})
+                GROUP BY model_name
+                ORDER BY model_name""",
+            params,
+        ).fetchall()
+    return {
+        "reviewed_model_name": REVIEWED_LEGACY_MODEL_NAME,
+        "reviewed_experiment_id": REVIEWED_LEGACY_EXPERIMENT_ID,
+        "eligible": eligible,
+        "already_assigned": already_assigned,
+        "blocked": {row["model_name"]: int(row["n"]) for row in blocked_rows},
+        "blocked_total": sum(int(row["n"]) for row in blocked_rows),
+    }
+
+
+def backfill_reviewed_legacy_experiment_id(
+    db_path: str = DB_PATH,
+    *,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Reconstruct experiment identity for reviewed legacy scores.
+
+    Only rows whose stored evidence uniquely establishes the reviewed identity
+    are touched: an exact ``model_name`` match, complete and consistent score
+    components, and no existing ``experiment_id``. A non-NULL identity is never
+    overwritten, and no score, label, timestamp, or model name is modified.
+
+    Every assignment appends a row to ``experiment_assignment_audit`` recording
+    the evidence relied on, so a reconstructed identity is always separable from
+    one written at scoring time. Re-running assigns nothing further.
+    """
+
+    from config import (
+        LEGACY_PROVENANCE_MIGRATION_VERSION,
+        REVIEWED_LEGACY_ASSIGNMENT_METHOD,
+        REVIEWED_LEGACY_EXPERIMENT_ID,
+    )
+
+    survey = survey_reviewed_legacy_candidates(db_path=db_path)
+    clause, params = _reviewed_legacy_params()
+    now = _now_iso()
+
+    if dry_run:
+        return {**survey, "assigned": 0, "dry_run": True, "reviewed_at": None}
+
+    with _conn(db_path) as con:
+        candidates = con.execute(
+            f"""SELECT id, model_name, score_components_kind, scored_at
+                FROM headlines WHERE {clause} ORDER BY id""",
+            params,
+        ).fetchall()
+        if not candidates:
+            return {**survey, "assigned": 0, "dry_run": False, "reviewed_at": now}
+
+        audit_rows = []
+        for row in candidates:
+            evidence = json.dumps(
+                {
+                    "model_name": row["model_name"],
+                    "score_components_kind": row["score_components_kind"],
+                    "scored_at": row["scored_at"],
+                    "rule": (
+                        "exact model/prompt identity with complete score "
+                        "components and no prior experiment_id"
+                    ),
+                },
+                sort_keys=True,
+            )
+            audit_rows.append((
+                int(row["id"]),
+                REVIEWED_LEGACY_EXPERIMENT_ID,
+                REVIEWED_LEGACY_ASSIGNMENT_METHOD,
+                evidence,
+                now,
+                LEGACY_PROVENANCE_MIGRATION_VERSION,
+            ))
+
+        # The UPDATE repeats the eligibility clause so a row that stopped
+        # qualifying between the SELECT and the write is not assigned anyway.
+        con.execute(
+            f"""UPDATE headlines
+                SET experiment_id = :assigned
+                WHERE {clause}""",
+            {**params, "assigned": REVIEWED_LEGACY_EXPERIMENT_ID},
+        )
+        con.executemany(
+            """INSERT INTO experiment_assignment_audit
+               (headline_id, assigned_experiment_id, assignment_method,
+                evidence, reviewed_at, migration_version)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            audit_rows,
+        )
+
+    logger.info(
+        "Reviewed legacy provenance: assigned %s to %d headline(s)",
+        REVIEWED_LEGACY_EXPERIMENT_ID, len(audit_rows),
+    )
+    return {
+        **survey,
+        "assigned": len(audit_rows),
+        "dry_run": False,
+        "reviewed_at": now,
+        "migration_version": LEGACY_PROVENANCE_MIGRATION_VERSION,
+    }
+
+
+def list_reviewed_legacy_assignments(
+    db_path: str = DB_PATH,
+    *,
+    active_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """Return the current reconstruction state per headline.
+
+    ``active_only`` keeps headlines whose most recent audit entry is still an
+    assignment, which is exactly the set a rollback may revert.
+    """
+
+    from config import (
+        LEGACY_PROVENANCE_MIGRATION_VERSION,
+        REVIEWED_LEGACY_ASSIGNMENT_METHOD,
+    )
+
+    with _conn(db_path) as con:
+        rows = con.execute(
+            """SELECT a.headline_id, a.assigned_experiment_id,
+                      a.assignment_method, a.evidence, a.reviewed_at,
+                      a.migration_version
+               FROM experiment_assignment_audit AS a
+               JOIN (SELECT headline_id, MAX(assignment_id) AS last_id
+                     FROM experiment_assignment_audit
+                     WHERE migration_version = ?
+                     GROUP BY headline_id) AS latest
+                 ON latest.last_id = a.assignment_id
+               ORDER BY a.headline_id""",
+            (LEGACY_PROVENANCE_MIGRATION_VERSION,),
+        ).fetchall()
+    entries = [dict(row) for row in rows]
+    if active_only:
+        entries = [
+            entry for entry in entries
+            if entry["assignment_method"] == REVIEWED_LEGACY_ASSIGNMENT_METHOD
+        ]
+    return entries
+
+
+def rollback_reviewed_legacy_experiment_id(db_path: str = DB_PATH) -> Dict[str, Any]:
+    """Revert only the assignments this migration actually made.
+
+    A headline is reverted when its latest audit entry is an assignment from
+    this migration *and* its stored ``experiment_id`` still equals the value
+    that migration wrote. A row changed since then is left alone and reported,
+    so a rollback can never quietly discard newer provenance.
+    """
+
+    from config import (
+        LEGACY_PROVENANCE_MIGRATION_VERSION,
+        REVIEWED_LEGACY_ROLLBACK_METHOD,
+    )
+
+    active = list_reviewed_legacy_assignments(db_path=db_path, active_only=True)
+    if not active:
+        return {"reverted": 0, "skipped_diverged": 0, "reverted_at": None}
+
+    now = _now_iso()
+    reverted: List[int] = []
+    diverged: List[int] = []
+    with _conn(db_path) as con:
+        for entry in active:
+            headline_id = int(entry["headline_id"])
+            row = con.execute(
+                "SELECT experiment_id FROM headlines WHERE id = ?",
+                (headline_id,),
+            ).fetchone()
+            if row is None:
+                continue
+            if row["experiment_id"] != entry["assigned_experiment_id"]:
+                diverged.append(headline_id)
+                continue
+            reverted.append(headline_id)
+
+        if reverted:
+            con.executemany(
+                "UPDATE headlines SET experiment_id = NULL WHERE id = ?",
+                [(headline_id,) for headline_id in reverted],
+            )
+            con.executemany(
+                """INSERT INTO experiment_assignment_audit
+                   (headline_id, assigned_experiment_id, assignment_method,
+                    evidence, reviewed_at, migration_version)
+                   VALUES (?, NULL, ?, ?, ?, ?)""",
+                [
+                    (
+                        headline_id,
+                        REVIEWED_LEGACY_ROLLBACK_METHOD,
+                        json.dumps(
+                            {"rule": "reverted a reviewed legacy assignment"},
+                            sort_keys=True,
+                        ),
+                        now,
+                        LEGACY_PROVENANCE_MIGRATION_VERSION,
+                    )
+                    for headline_id in reverted
+                ],
+            )
+
+    logger.info(
+        "Reviewed legacy provenance rollback: reverted %d, left %d diverged",
+        len(reverted), len(diverged),
+    )
+    return {
+        "reverted": len(reverted),
+        "skipped_diverged": len(diverged),
+        "diverged_headline_ids": diverged[:20],
+        "reverted_at": now if reverted else None,
+    }
 
 
 def relabel_from_probs(

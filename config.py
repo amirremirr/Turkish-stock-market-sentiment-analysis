@@ -193,6 +193,26 @@ EVENTS_DUAL_WRITE  = True       # mirror scored headlines into the events table
 EXPERIMENT_ID      = "v1-p3"  # stamped on every pipeline run; bumped 2026-06-13
                               # with the prompt-p3 recalibration + full re-score
 
+# -- Reviewed legacy score provenance -------------------------------------------
+# Scores written before headlines.experiment_id existed carry NULL provenance.
+# Experiment identity is never guessed, but it may be RECONSTRUCTED when stored
+# evidence uniquely establishes it. The 3465 pre-provenance production rows all
+# carry exactly one model/prompt identity, and that identity is what v1-p3
+# names, so their experiment is recoverable rather than assumed.
+#
+# A row qualifies only on an exact model_name match with complete, consistent
+# score components and no existing experiment_id. Every assignment is written to
+# the append-only experiment_assignment_audit table, so a reconstructed identity
+# is always distinguishable from one recorded at scoring time.
+REVIEWED_LEGACY_MODEL_NAME       = "gpt-5-mini-2025-08-07/p3"
+REVIEWED_LEGACY_EXPERIMENT_ID    = "v1-p3"
+# score_components_kind values consistent with that scorer. NULL is tolerated
+# (the column postdates some rows); any other value is conflicting evidence.
+REVIEWED_LEGACY_COMPONENT_KINDS  = ("synthetic_compatibility",)
+LEGACY_PROVENANCE_MIGRATION_VERSION = "legacy-experiment-provenance-v1"
+REVIEWED_LEGACY_ASSIGNMENT_METHOD   = "reviewed_legacy_backfill"
+REVIEWED_LEGACY_ROLLBACK_METHOD     = "reviewed_legacy_rollback"
+
 # Source tiers (Phase 3 will add Tier A ingestion — KAP, TCMB, TUIK).
 # A = structured/auditable primary sources, B = wires/official statements,
 # C = general press RSS (sentiment-heavy, noisy).

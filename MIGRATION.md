@@ -64,6 +64,8 @@ The migration discipline remains add-only. `database.init_db()` uses idempotent 
 
 Aggregation now enforces that provenance boundary. More than one eligible experiment identity blocks the rebuild before any derived rows are cleared. Operators may use `--allow-mixed-experiments` only as an explicit exception; a full run persists the aggregation as degraded and records the identities. Legacy NULL provenance is displayed as a model-scoped unassigned identity rather than silently mapped to the current experiment.
 
+Experiment identity is never guessed, but it may be reconstructed. `scripts/migrate_legacy_experiment_id.py` resolves pre-provenance rows only where stored evidence uniquely establishes the identity — exact model/prompt match, complete and consistent score components, no existing assignment — and records each assignment in the append-only `experiment_assignment_audit` table with the evidence used. Rows with conflicting evidence keep NULL and keep blocking aggregation, which is the safe direction: an unassigned row is visible, a wrongly assigned one is not. The migration is additive, idempotent, and reversible; rollback restores NULL only for rows it assigned and leaves any identity written since then untouched.
+
 ### Processing and provenance columns
 
 Added to `headlines`:
