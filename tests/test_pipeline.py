@@ -667,6 +667,24 @@ class TestCategoryClassifier:
 # L5 - Visualisation: graceful handling of thin / empty data
 # -----------------------------------------------------------------------------
 
+def _recent_trading_days(count: int, *, ending_days_ago: int = 3) -> list[str]:
+    """Return the *count* most recent trading days on or before a recent date.
+
+    Price fixtures must not contain weekend or holiday bars: the exchange held
+    no session, so such a row is provider noise and is withheld from analysis.
+    Walking the real calendar keeps the fixture valid on any day the suite runs.
+    """
+    from trading_calendar import is_trading_day
+
+    day = date.today() - timedelta(days=ending_days_ago)
+    collected: list[str] = []
+    while len(collected) < count:
+        if is_trading_day(day):
+            collected.append(day.isoformat())
+        day -= timedelta(days=1)
+    return sorted(collected)
+
+
 class TestVisualize:
     def test_returns_none_when_no_data(self, tmp_db, tmp_path):
         out = str(tmp_path / "plot.png")
@@ -689,13 +707,16 @@ class TestVisualize:
 
     def test_saves_png_with_sufficient_data(self, tmp_db, tmp_path):
         """With 5+ overlapping days the plot should render and save."""
-        # Dates relative to today so they never age out of the lookback window.
-        _base = date.today() - timedelta(days=8)
+        # Recent TRADING days, so the fixture never places a bar on a session
+        # the exchange did not hold. Relative to today so the rows stay inside
+        # the lookback window whenever the suite runs.
         days = [
-            ((_base + timedelta(days=i)).isoformat(), price, score)
-            for i, (price, score) in enumerate(
+            (day, price, score)
+            for day, (price, score) in zip(
+                _recent_trading_days(5),
                 [(14000.0, 0.50), (13900.0, -0.71), (14100.0, 0.72),
-                 (14050.0, -0.35), (14200.0, 0.71)])
+                 (14050.0, -0.35), (14200.0, 0.71)],
+            )
         ]
         prices = pd.DataFrame({
             "date":         [d[0] for d in days],
@@ -743,13 +764,16 @@ class TestVisualize:
         The function should still save the PNG -- callers inspect the log for warnings.
         """
         # 5 days: above the hard floor (5) but below MINIMUM_OVERLAP_DAYS (30).
-        # Dates relative to today so they never age out of the lookback window.
-        _base = date.today() - timedelta(days=8)
+        # Recent TRADING days, so the fixture never places a bar on a session
+        # the exchange did not hold. Relative to today so the rows stay inside
+        # the lookback window whenever the suite runs.
         days = [
-            ((_base + timedelta(days=i)).isoformat(), price, score)
-            for i, (price, score) in enumerate(
+            (day, price, score)
+            for day, (price, score) in zip(
+                _recent_trading_days(5),
                 [(14000.0, 0.50), (13900.0, -0.71), (14100.0, 0.72),
-                 (14050.0, -0.35), (14200.0, 0.71)])
+                 (14050.0, -0.35), (14200.0, 0.71)],
+            )
         ]
         prices = pd.DataFrame({
             "date":         [d[0] for d in days],
