@@ -576,7 +576,84 @@ of that session are wrong.
 Sentiment aggregates are unaffected: `aggregate_step` reads only headlines, so
 `daily_signal_variants` and the category tables do not depend on this row.
 
-**This row must be refreshed before any price-based analysis uses that session**,
-and daily-bar completeness must be enforced before the scheduled workflow is
-re-enabled — otherwise every run started at 06:30 UTC will write another
-mid-session bar for the current day.
+**Resolved 2026-08-06.** The bar was refetched after settlement (close 13 458.10,
+volume 6 451 200 000, return +1.2428%) and daily-bar completeness is now enforced
+by `price_bars.py`. See §15.
+
+---
+
+## 15. Production hardening and reopening — 2026-08-06
+
+The controlled run (31057962974) exercised the full production path
+successfully and exposed three operational defects. All three are fixed, the
+fixes were verified by a second controlled run (31058846192), and both
+schedules are enabled.
+
+### Defects found and fixed
+
+**1. Excluded headlines degraded every run.** The processing audit counted all
+pending rows as unresolved, including the 198 headlines the relevance filter
+withheld at ingest. Those are deliberately never scored, so run 53 reported
+`degraded` on rows working exactly as designed. The audit now splits by
+eligibility; only rows *without* an active exclusion count as unresolved.
+Excluded rows are reported under their own keys and raise an informational
+warning instead. No `processing_status` was rewritten to achieve this.
+
+**2. `corrected` provenance was lost to routine refreshes.** The precedence
+table ranked `complete` and `corrected` equally, so an ordinary fetch returning
+identical settled values overwrote the record that 2026-07-31 had been repaired.
+`corrected` is now sticky through any later settled refresh, can never regress,
+and `complete → corrected` is reachable only through the explicit repair path.
+
+**3. Fetch-window boundary nulled valid returns.** `pct_change()` ran inside the
+downloaded window, so its first row had no predecessor and the resulting NULL
+overwrote a stored value — 2026-05-04 lost its return during run 53. Returns are
+now rebuilt from the full ordered stored series over settled bars only. The fix
+**repaired 24 historical sessions** whose returns had been nulled at past window
+boundaries; none was newly nulled.
+
+### New: after-close price-only workflow
+
+`.github/workflows/after_close_prices.yml` runs weekdays at 16:10 UTC and
+settles the day's provisional bar. It refreshes prices and factors only — no
+scrape, no LLM, no credential exposed — and an Istanbul-time runtime guard
+re-checks the real session close, including half-day early closes, so a drifting
+or late cron cannot cause a mid-session run. Both workflows share the
+`bist-database-writer` concurrency group.
+
+### Verification run 31058846192 (run 54)
+
+```
+conclusion: success        chart step: SKIPPED
+pipeline status: success   (was degraded)
+scrape/scoring/aggregation/market_data/audit: all success
+audit: pending_eligible 0 · retry_pending_eligible 0 · failed_eligible 0
+       pending_excluded 198 · scored 3558 · scored_excluded 274 · active_exclusions 472
+returns recomputed: 24 (all NULL -> value; none newly nulled)
+```
+
+### Published state
+
+| | Commit | DB SHA-256 |
+|---|---|---|
+| Before hardening | `f32bdfd` | `a161b71e…0af1837` |
+| Run 54 | `7d26571` | `44354b6e…099add03` |
+| **Current** | **`0f0ade4`** | **`0d8418a98d82e83b9c52bbdcd104ab4c8c93066064f7c6b25804d875e7afad93`** |
+
+The final publication restored `corrected` on 2026-07-31. Run 53 had erased it
+*before* the stickiness fix shipped, so the fix prevented recurrence but could
+not retroactively restore what was already lost; it was reinstated through the
+explicit repair path with all OHLCV and return values byte-identical.
+
+All 110 bars settled, `get_prices(complete_only=True)` returns 110 of 110, no bar
+flagged for review, one NULL return (the earliest stored session, genuinely
+without a predecessor). Eligible identities `['v1-p3']`; headline, score,
+exclusion, signal-variant, event and provenance-audit fingerprints unchanged
+throughout.
+
+### Both schedules enabled
+
+`daily-pipeline` (`30 6 * * 1-5`) and `after-close-prices` (`10 16 * * 1-5`) are
+active. **Their first recurring executions had not occurred when this was
+written and remain external operational checkpoints.** See
+[OPERATIONS.md](OPERATIONS.md).

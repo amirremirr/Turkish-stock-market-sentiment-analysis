@@ -278,16 +278,38 @@ dependence diagnostics, event-ID guards, and interpretation limits.
 
 ## 8. Automation
 
-The primary automation is `.github/workflows/daily.yml`:
+Two scheduled workflows share the `bist-database-writer` concurrency group so they queue rather than overlap on the same SQLite file and force-pushed branch. Full operational detail is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
-1. runs Monday-Friday at 06:30 UTC;
+**Morning ingestion — `.github/workflows/daily.yml`:**
+
+1. runs Monday-Friday at 06:30 UTC, before the Istanbul open;
 2. restores `finance_sentiment.db` from `origin/data`;
 3. installs the no-Torch cloud dependencies;
 4. runs `python main.py run --no-show` with the OpenAI key;
-5. publishes an updated current chart when it changes;
-6. force-updates an orphan data branch with the current DB and chart snapshot.
+5. publishes an updated current chart when it changes (a manual dispatch may set `publish_chart=false` to skip it);
+6. runs the stale-snapshot publication guard;
+7. force-updates an orphan data branch with the current DB and chart snapshot.
+
+**After-close price refresh — `.github/workflows/after_close_prices.yml`:**
+
+1. runs Monday-Friday at 16:10 UTC, after the Istanbul close;
+2. refreshes prices and market factors only — it does not scrape, does not call the scorer, and receives no credential, so it cannot alter scores, labels, experiment identities, exclusions or events;
+3. promotes the morning run's provisional bar to complete;
+4. runs the same publication guard and publishes the database, never a README figure.
+
+The morning run fires before the open, so the bar it stores for the current session is an intraday snapshot and is written as `provisional`. The after-close job settles it. A cron cannot make that judgement — GitHub fires schedules late and a UTC cron drifts against Istanbul across daylight-saving changes — so an Istanbul-time runtime guard re-checks the real session close, including official half-day early closes, and no-ops before settlement or on a non-trading day.
 
 `run_scheduled.py`, Task Scheduler XML, and registration scripts remain a legacy local route with rolling backups. They are not the cloud workflow.
+
+### Price-bar completeness
+
+Each row of `bist100_prices` carries `bar_status` (`provisional`, `complete`, `corrected`, `provider_invalid`), `bar_observed_at`, `bar_review_reason` and `bar_rule_version`. `get_prices()` returns settled bars only by default; an unclassified NULL-status row is withheld too, because it is not a verified one. Completion never runs backwards, and `corrected` is sticky provenance rather than a quality tier: an ordinary refresh returning identical settled values keeps it, and only the explicit repair path can promote a `complete` bar. Zero or missing volume on a session that did trade sets a review reason rather than changing the status.
+
+`daily_return` is rebuilt from the full ordered stored series over settled bars after every upsert, never from the downloaded window, so a fetch boundary cannot null a valid stored return and a corrected close automatically updates the following session.
+
+### Run status and unscored headlines
+
+The processing audit distinguishes eligibility from processing status. Only pending, retry or failed rows *without* an active exclusion count as unresolved and degrade a run. Headlines withheld by the relevance filter at ingest are deliberately never scored; they are reported under `pending_excluded`/`scored_excluded` with an informational warning so a filter regression stays visible, but they do not degrade the run. Their `processing_status` is never rewritten to make the audit pass, and exclusions stay reversible.
 
 ## 9. Evaluation and test communication
 
