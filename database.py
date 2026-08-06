@@ -356,6 +356,166 @@ CREATE TABLE IF NOT EXISTS news_volume_daily (
     PRIMARY KEY (signal_date, signal_family, experiment_id, window_sessions, method_version)
 );
 
+-- Candidate event groups. These are ALGORITHMIC groupings, not verified
+-- real-world events; review_state records how far that has been checked.
+CREATE TABLE IF NOT EXISTS event_groups (
+    group_key               TEXT NOT NULL,
+    algorithm_version       TEXT NOT NULL,
+    signal_family           TEXT,
+    event_type              TEXT,
+    primary_entity          TEXT,
+    entity_ids              TEXT,
+    headline_count          INTEGER NOT NULL,
+    source_count            INTEGER NOT NULL,
+    sources                 TEXT,
+    first_seen_at           TEXT,
+    last_seen_at            TEXT,
+    unknown_timestamp_count INTEGER NOT NULL DEFAULT 0,
+    signal_date             TEXT,
+    signal_date_span        INTEGER,
+    mean_sentiment          REAL,
+    median_sentiment        REAL,
+    sentiment_dispersion    REAL,
+    cross_source_dispersion REAL,
+    strong_positive_count   INTEGER,
+    strong_negative_count   INTEGER,
+    market_recap_count      INTEGER NOT NULL DEFAULT 0,
+    is_singleton            INTEGER NOT NULL DEFAULT 0,
+    is_single_source        INTEGER NOT NULL DEFAULT 0,
+    novelty                 REAL,
+    prior_entity_events     INTEGER,
+    review_state            TEXT NOT NULL DEFAULT 'unreviewed',
+    updated_at              TEXT NOT NULL,
+    PRIMARY KEY (group_key, algorithm_version)
+);
+CREATE INDEX IF NOT EXISTS idx_event_groups_signal
+    ON event_groups(signal_date, signal_family);
+
+-- Every headline-to-event assignment with the evidence that produced it.
+CREATE TABLE IF NOT EXISTS event_headline_map (
+    group_key         TEXT NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    headline_id       INTEGER NOT NULL REFERENCES headlines(id),
+    similarity        REAL,
+    match_rule        TEXT,
+    entity_overlap    TEXT,
+    assigned_at       TEXT NOT NULL,
+    PRIMARY KEY (group_key, algorithm_version, headline_id)
+);
+CREATE INDEX IF NOT EXISTS idx_event_headline_map_headline
+    ON event_headline_map(headline_id);
+
+CREATE TABLE IF NOT EXISTS event_group_entities (
+    group_key         TEXT NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    entity_type       TEXT NOT NULL,
+    entity_id         TEXT NOT NULL,
+    rule_version      TEXT NOT NULL,
+    PRIMARY KEY (group_key, algorithm_version, entity_type, entity_id)
+);
+
+-- Append-only record of manual split/merge review. A correction is a new row,
+-- never an edit, so the grouping history stays readable after the fact.
+CREATE TABLE IF NOT EXISTS event_group_audit (
+    audit_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key         TEXT NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    action            TEXT NOT NULL,
+    actor             TEXT NOT NULL,
+    headline_ids      TEXT,
+    target_group_key  TEXT,
+    rationale         TEXT,
+    performed_at      TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_event_group_audit_no_update
+BEFORE UPDATE ON event_group_audit
+BEGIN
+    SELECT RAISE(ABORT, 'event_group_audit is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_event_group_audit_no_delete
+BEFORE DELETE ON event_group_audit
+BEGIN
+    SELECT RAISE(ABORT, 'event_group_audit is append-only');
+END;
+
+-- Timing-safe market windows per candidate event.
+CREATE TABLE IF NOT EXISTS event_return_windows (
+    group_key           TEXT NOT NULL,
+    algorithm_version   TEXT NOT NULL,
+    window_name         TEXT NOT NULL,
+    information_cutoff  TEXT,
+    assumed_execution   TEXT,
+    entry_price_field   TEXT,
+    exit_price_field    TEXT,
+    entry_date          TEXT,
+    exit_date           TEXT,
+    entry_price         REAL,
+    exit_price          REAL,
+    raw_return          REAL,
+    is_available        INTEGER NOT NULL DEFAULT 0,
+    unavailable_reason  TEXT,
+    rule_version        TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    PRIMARY KEY (group_key, algorithm_version, window_name, rule_version)
+);
+
+-- Residual returns per (session, window, control set). kind separates tradable
+-- controls from contemporaneous descriptive ones.
+CREATE TABLE IF NOT EXISTS control_residual_returns (
+    exit_date               TEXT NOT NULL,
+    window_name             TEXT NOT NULL,
+    control_set_id          TEXT NOT NULL,
+    kind                    TEXT NOT NULL,
+    raw_return              REAL,
+    fitted                  REAL,
+    residual                REAL,
+    coefficients            TEXT,
+    estimation_observations INTEGER,
+    estimation_window_end   TEXT,
+    version                 TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    PRIMARY KEY (exit_date, window_name, control_set_id, version)
+);
+
+-- The event-level research dataset. Ready for walk-forward evaluation; no
+-- model, strategy or protocol is applied to it here.
+CREATE TABLE IF NOT EXISTS event_research_dataset (
+    group_key            TEXT NOT NULL,
+    algorithm_version    TEXT NOT NULL,
+    experiment_id        TEXT NOT NULL,
+    window_name          TEXT NOT NULL,
+    signal_date          TEXT,
+    signal_family        TEXT,
+    event_type           TEXT,
+    primary_entity       TEXT,
+    timing_bucket        TEXT,
+    eligibility_status   TEXT NOT NULL,
+    eligibility_reason   TEXT,
+    headline_count       INTEGER,
+    source_count         INTEGER,
+    mean_sentiment       REAL,
+    median_sentiment     REAL,
+    sentiment_dispersion REAL,
+    cross_source_dispersion REAL,
+    novelty              REAL,
+    market_recap_count   INTEGER,
+    information_cutoff   TEXT,
+    assumed_execution    TEXT,
+    entry_date           TEXT,
+    exit_date            TEXT,
+    raw_return           REAL,
+    residual_none        REAL,
+    residual_em_lagged   REAL,
+    residual_em_oil_fx_lagged REAL,
+    residual_em_contemporaneous REAL,
+    blocked_features     TEXT,
+    dataset_version      TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    PRIMARY KEY (group_key, algorithm_version, window_name, experiment_id, dataset_version)
+);
+CREATE INDEX IF NOT EXISTS idx_event_research_signal
+    ON event_research_dataset(signal_date, eligibility_status);
+
 -- Reviewed reconstruction of legacy score provenance. Append-only by trigger:
 -- an assignment and a later rollback are two rows, never an edit of one, so the
 -- reconstruction history of any headline stays readable after the fact.
@@ -1626,6 +1786,168 @@ def upsert_volume(rows, db_path: str = DB_PATH) -> int:
         "observation_count", "source_breadth", "window_sessions", "min_history",
         "prior_mean", "prior_std", "prior_count", "volume_z", "volume_percentile",
         "change_1", "change_5", "change_20", "method_version", "updated_at",
+    ], rows, db_path)
+
+
+# -- Candidate events ----------------------------------------------------------
+
+def replace_event_groups(
+    groups: List[Dict[str, Any]],
+    mappings: List[Dict[str, Any]],
+    entities: List[Dict[str, Any]],
+    *,
+    algorithm_version: str,
+    db_path: str = DB_PATH,
+) -> Dict[str, int]:
+    """Rebuild candidate groups for one algorithm version.
+
+    Rows for *this* algorithm version are replaced so a rerun is idempotent;
+    rows written by another version are untouched, and the append-only
+    ``event_group_audit`` is never cleared, so manual review history survives a
+    regrouping.
+    """
+    now = _now_iso()
+    with _conn(db_path) as con:
+        con.execute(
+            "DELETE FROM event_groups WHERE algorithm_version = ?",
+            (algorithm_version,),
+        )
+        con.execute(
+            "DELETE FROM event_headline_map WHERE algorithm_version = ?",
+            (algorithm_version,),
+        )
+        con.execute(
+            "DELETE FROM event_group_entities WHERE algorithm_version = ?",
+            (algorithm_version,),
+        )
+        columns = [
+            "group_key", "algorithm_version", "signal_family", "event_type",
+            "primary_entity", "entity_ids", "headline_count", "source_count",
+            "sources", "first_seen_at", "last_seen_at",
+            "unknown_timestamp_count", "signal_date", "signal_date_span",
+            "mean_sentiment", "median_sentiment", "sentiment_dispersion",
+            "cross_source_dispersion", "strong_positive_count",
+            "strong_negative_count", "market_recap_count", "is_singleton",
+            "is_single_source", "novelty", "prior_entity_events",
+            "review_state", "updated_at",
+        ]
+        con.executemany(
+            f"INSERT OR REPLACE INTO event_groups ({','.join(columns)}) "
+            f"VALUES ({','.join('?' * len(columns))})",
+            [
+                tuple(row.get(column, now if column == "updated_at" else None)
+                      for column in columns)
+                for row in groups
+            ],
+        )
+        con.executemany(
+            """INSERT OR REPLACE INTO event_headline_map
+               (group_key, algorithm_version, headline_id, similarity,
+                match_rule, entity_overlap, assigned_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            [
+                (row["group_key"], algorithm_version, row["headline_id"],
+                 row.get("similarity"), row.get("match_rule"),
+                 row.get("entity_overlap"), now)
+                for row in mappings
+            ],
+        )
+        con.executemany(
+            """INSERT OR REPLACE INTO event_group_entities
+               (group_key, algorithm_version, entity_type, entity_id, rule_version)
+               VALUES (?,?,?,?,?)""",
+            [
+                (row["group_key"], algorithm_version, row["entity_type"],
+                 row["entity_id"], row["rule_version"])
+                for row in entities
+            ],
+        )
+    return {
+        "groups": len(groups), "mappings": len(mappings), "entities": len(entities),
+    }
+
+
+def record_event_group_action(
+    group_key: str,
+    action: str,
+    actor: str,
+    *,
+    algorithm_version: str,
+    headline_ids: Optional[Sequence[int]] = None,
+    target_group_key: Optional[str] = None,
+    rationale: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> int:
+    """Append one manual review action (split, merge, confirm, reject).
+
+    Appending never rewrites the automatic grouping. The grouping stays as the
+    algorithm produced it and the human judgement sits beside it, so the two can
+    always be told apart.
+    """
+    if action not in ("split", "merge", "confirm", "reject", "annotate"):
+        raise ValueError(f"unsupported review action: {action!r}")
+    with _conn(db_path) as con:
+        cursor = con.execute(
+            """INSERT INTO event_group_audit
+               (group_key, algorithm_version, action, actor, headline_ids,
+                target_group_key, rationale, performed_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (group_key, algorithm_version, action, actor,
+             ",".join(str(i) for i in headline_ids) if headline_ids else None,
+             target_group_key, rationale, _now_iso()),
+        )
+        if action in ("confirm", "reject"):
+            con.execute(
+                "UPDATE event_groups SET review_state=? "
+                "WHERE group_key=? AND algorithm_version=?",
+                ("confirmed" if action == "confirm" else "rejected",
+                 group_key, algorithm_version),
+            )
+    return int(cursor.lastrowid)
+
+
+def list_event_group_audit(
+    group_key: Optional[str] = None, db_path: str = DB_PATH,
+) -> List[Dict[str, Any]]:
+    clause = " WHERE group_key = ?" if group_key else ""
+    params = (group_key,) if group_key else ()
+    with _conn(db_path) as con:
+        return [
+            dict(row) for row in con.execute(
+                f"SELECT * FROM event_group_audit{clause} ORDER BY audit_id", params
+            )
+        ]
+
+
+def upsert_event_return_windows(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("event_return_windows", [
+        "group_key", "algorithm_version", "window_name", "information_cutoff",
+        "assumed_execution", "entry_price_field", "exit_price_field",
+        "entry_date", "exit_date", "entry_price", "exit_price", "raw_return",
+        "is_available", "unavailable_reason", "rule_version", "updated_at",
+    ], rows, db_path)
+
+
+def upsert_control_residuals(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("control_residual_returns", [
+        "exit_date", "window_name", "control_set_id", "kind", "raw_return",
+        "fitted", "residual", "coefficients", "estimation_observations",
+        "estimation_window_end", "version", "updated_at",
+    ], rows, db_path)
+
+
+def upsert_event_dataset(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("event_research_dataset", [
+        "group_key", "algorithm_version", "experiment_id", "window_name",
+        "signal_date", "signal_family", "event_type", "primary_entity",
+        "timing_bucket", "eligibility_status", "eligibility_reason",
+        "headline_count", "source_count", "mean_sentiment", "median_sentiment",
+        "sentiment_dispersion", "cross_source_dispersion", "novelty",
+        "market_recap_count", "information_cutoff", "assumed_execution",
+        "entry_date", "exit_date", "raw_return", "residual_none",
+        "residual_em_lagged", "residual_em_oil_fx_lagged",
+        "residual_em_contemporaneous", "blocked_features", "dataset_version",
+        "updated_at",
     ], rows, db_path)
 
 
