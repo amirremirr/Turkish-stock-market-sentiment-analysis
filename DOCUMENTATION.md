@@ -307,6 +307,27 @@ Each row of `bist100_prices` carries `bar_status` (`provisional`, `complete`, `c
 
 `daily_return` is rebuilt from the full ordered stored series over settled bars after every upsert, never from the downloaded window, so a fetch boundary cannot null a valid stored return and a corrected close automatically updates the following session.
 
+### Phase A descriptive indicators
+
+After session aggregation the pipeline derives a versioned `signal_family` and a
+rules-based `is_market_recap` flag beside the frozen detailed `category`, then
+computes four analytical tables: `daily_family_signals`, `abnormal_tone_daily`,
+`news_disagreement_daily` and `news_volume_daily`. A domestic-only composite is
+stored under the family key `__domestic__`; the pre-existing overall
+`daily_signal_variants` table is unchanged.
+
+Indicators are additive analysis and run fail-soft: a failure degrades the run
+and leaves every existing aggregate intact. Nothing in the step writes a
+sentiment score, label, detailed category or experiment identity, and no scoring
+prompt changes. Ambiguous family assignments are reported in the coverage report
+rather than forced, and do not degrade a run unless their share is high enough
+to suggest the rules no longer fit the corpus.
+
+All time-series normalization uses observations strictly before the date being
+described, and reports NULL rather than a fabricated zero when history or
+independent sources are insufficient. Full detail in
+[docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md).
+
 ### Run status and unscored headlines
 
 The processing audit distinguishes eligibility from processing status. Only pending, retry or failed rows *without* an active exclusion count as unresolved and degrade a run. Headlines withheld by the relevance filter at ingest are deliberately never scored; they are reported under `pending_excluded`/`scored_excluded` with an informational warning so a filter regression stays visible, but they do not degrade the run. Their `processing_status` is never rewritten to make the audit pass, and exclusions stay reversible.

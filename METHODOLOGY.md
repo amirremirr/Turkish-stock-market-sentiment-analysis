@@ -211,6 +211,22 @@ Scored rows retain model provenance including the API snapshot and prompt versio
 
 Files under `docs/*_findings.md` and checked-in figures are dated research artifacts. Additive schema migration does not silently regenerate them. A result-changing re-score, re-aggregation, or analysis rerun must be explicit and its changed interpretation documented.
 
+## 13. Descriptive signal families and indicators
+
+The detailed `category` assigned at scoring time is a measurement input and is frozen. A `signal_family` layer is derived from it plus transparent Turkish headline rules and carries its own version, so the economic grouping can be revised without redefining the historical record. Families separate channels the topical categories do not: monetary policy, inflation/macro, political-regulatory risk, FX, banking sector, named-issuer events, global risk, market recap, media narrative, and other.
+
+The banking boundary is entity specificity, not industry. Sector- and system-level banking news is `banking_financial_sector`; a named listed bank's own earnings, dividend or disclosure is `company_kap`, exactly as for any other issuer. A named bank without an issuer-level event is assigned to the sector and flagged ambiguous rather than forced. Unresolvable assignments are reported in a coverage report; they are never silently coerced.
+
+Market recap is a separate rules-based classification, not a scoring category. Extending the scoring prompt would change the stored model identity, split the experiment and invalidate the held-out validation, so recap detection lives beside the score instead. A recap reports a price move that already occurred; including such headlines in a directional signal creates a reverse-causality trap in which the tone follows the return by construction. Recaps are preserved for attention and reverse-causality analysis and excluded by default only from directional research outputs.
+
+A domestic-only composite excludes global risk and market recap. The pre-existing overall session aggregate is unchanged; the composite is an addition, not a replacement.
+
+Time-series normalization uses observations strictly before the date being described. Abnormal tone compares each outlet, outlet-family and family against its own prior rolling window; a full-sample mean would leak future information into every historical value and make later evaluation meaningless. Below a minimum history the value is NULL, and a zero-variance prior yields NULL rather than an unbounded z-score. This is time-series normalization against a key's own past, not a cross-sectional ranking against other keys on the same date.
+
+Disagreement indicators measure variation among observed news sources. They are not market uncertainty and are not described as such. Cross-outlet statistics require a minimum number of independently represented outlets and report NULL otherwise, because zero would assert a consensus that was never observed. Volume indicators separate headline count, distinct-event count and outlet breadth, since syndicated copies of one wire story are one event covered widely rather than several independent observations.
+
+Wherever a value cannot be defensibly computed the indicator reports NULL. A zero would be read as a substantive neutral finding when the truth is an insufficient sample.
+
 ## 12. Principal limitations
 
 1. One primary human annotator defines the current rubric; multi-annotator generalizability is not established.

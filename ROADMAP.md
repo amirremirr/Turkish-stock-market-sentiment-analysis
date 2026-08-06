@@ -138,7 +138,20 @@ Completed 2026-08-06, verification only; the canonical database was not migrated
 - added a production-shaped legacy fixture, a reusable migration verifier, and a guard refusing publication of a stale snapshot;
 - resolved legacy score provenance through a reviewed, audited, reversible migration.
 
-## Approved decisions pending Phase A implementation
+## Phase A - Descriptive financial intelligence - completed
+
+Completed 2026-08-06. Versioned signal-family taxonomy over the frozen detailed
+category; rules-based market-recap classification with false-positive exemptions;
+per-family daily signals and a domestic-only composite beside the unchanged
+overall aggregate; prior-only abnormal tone; news-disagreement and volume
+indicators with minimum-sample discipline; deterministic regime and coverage
+reports; a News Regime dashboard section; and an extended offline demo.
+
+No scoring prompt changed, no historical score, label, detailed category or
+experiment identity was modified, and the predictive result remains exploratory
+and null. See [docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md).
+
+## Approved decisions - implemented in Phase A
 
 These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**
 

@@ -66,6 +66,15 @@ Aggregation now enforces that provenance boundary. More than one eligible experi
 
 Daily price bars carry their own additive provenance (`bar_status`, `bar_observed_at`, `bar_review_reason`, `bar_rule_version`). Classification is derived metadata, not a rewrite: OHLCV values are never altered by it, and `backfill_price_bar_status()` resolves pre-rule rows from recorded run times rather than assuming they were settled. `daily_return` is recomputed from the full ordered stored series over settled bars so a fetch-window boundary cannot null a valid stored return; that recomputation repaired 24 historical sessions on 2026-08-06 and nulled none. Status transitions only move toward completion, and `corrected` is sticky provenance that an ordinary refresh cannot erase. See [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
+Phase A adds derived classification columns to `headlines` (`signal_family`,
+`signal_family_version`, `signal_family_rule`, `signal_family_evidence`,
+`signal_family_ambiguous`, `signal_family_review`, `is_market_recap`,
+`market_recap_version`, `market_recap_rule`, `market_recap_evidence`,
+`market_recap_confidence`) and four analytical tables. Every addition is
+nullable or defaulted, and each analytical table is keyed by the versions that
+produced it, so revising a rule adds rows instead of rewriting history. The
+detailed `category` column is frozen and is never rewritten by this layer.
+
 Experiment identity is never guessed, but it may be reconstructed. `scripts/migrate_legacy_experiment_id.py` resolves pre-provenance rows only where stored evidence uniquely establishes the identity — exact model/prompt match, complete and consistent score components, no existing assignment — and records each assignment in the append-only `experiment_assignment_audit` table with the evidence used. Rows with conflicting evidence keep NULL and keep blocking aggregation, which is the safe direction: an unassigned row is visible, a wrongly assigned one is not. The migration is additive, idempotent, and reversible; rollback restores NULL only for rows it assigned and leaves any identity written since then untouched.
 
 ### Processing and provenance columns

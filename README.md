@@ -97,6 +97,33 @@ The recurring theme is that backups, loud failure states, held-out validation, a
 
 The central contribution is the evaluation discipline around the model: explicit labeling conventions, provenance, omission-aware processing, reversible exclusions, versioned session alignment, simple baselines, and visible residual risks.
 
+## Reading the news, not just scoring it
+
+A single daily average hides the thing a reader actually wants to know. A rate decision and a company earnings release reach a portfolio through different channels, so averaging them into one number discards exactly the structure that would make the series useful. The descriptive layer separates those channels and asks four different questions about each of them.
+
+Headlines are grouped into economically distinct **signal families** — monetary policy, inflation and macro, political and regulatory risk, currency, banking sector, named-issuer events, global risk, market recap, media narrative, and other. The grouping is derived from the frozen scoring category plus transparent Turkish headline rules, and carries its own version, so the economics can be revised without redefining what was measured. Where the rules cannot decide, the headline is reported as ambiguous rather than quietly forced into a bucket.
+
+The banking split is worth stating precisely, because it is easy to get wrong: the boundary is **entity specificity, not industry**. "Banking sector loan growth slows" is sector news; "Garanti BBVA announced results" is a named issuer's own disclosure, treated exactly like any other company's. Keying on whether a specific listed entity is named makes the rule work the same way in every sector instead of carving out a special case for banks.
+
+**Market recaps are identified and set aside.** A headline saying the index closed lower reports what the market did, not what it learned. Leaving those in a directional signal builds a reverse-causality trap: the tone follows the return by construction, so any apparent predictive relationship is the return predicting itself. They are kept — they measure attention, and they are the right sample for reverse-causality checks — but excluded by default from directional work.
+
+For each family and session the pipeline reports four separate things, because conflating them is how descriptive statistics start sounding like forecasts:
+
+| | |
+|---|---|
+| **Level** | where tone sits now |
+| **Change** | how it moved over 5 and 20 sessions |
+| **Abnormal** | where it sits against *its own* prior history |
+| **Attention** | how much coverage, from how many independent outlets |
+
+The abnormal measure is the one that required the most care. An outlet's absolute tone says little, since some papers are structurally gloomier than others — the same −0.2 is unremarkable from one and notable from another. So each outlet and family is normalized against its own rolling history, and **every value uses only observations strictly before the day it describes.** A full-sample mean would leak the future into every historical value and quietly invalidate any evaluation built on top of it.
+
+Two smaller distinctions carry real weight. Disagreement measures variation *among news sources* — it is not market uncertainty, and is never described as such. And ten copies of one wire story is one event covered widely, not ten independent signals, so headline count, event count and outlet breadth are counted and named separately.
+
+Throughout, a value that cannot be defensibly computed is reported as **NULL rather than zero**. A zero mean reads as "the news was neutral"; the truth is often "there were two headlines from one outlet", and those are different claims.
+
+None of this is a trading signal, and none of it has been evaluated out-of-sample. The predictive result remains exploratory and null. Detail in [docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md).
+
 ## What the news itself looks like
 
 The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findings are dated snapshots rather than automatically current totals:

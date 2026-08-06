@@ -147,6 +147,28 @@ a filter regression is still noticeable. Exclusions remain reversible: a restore
 headline simply becomes eligible again and the next scoring pass picks it up. The
 `processing_status` of an excluded row is never rewritten to make the audit pass.
 
+## Phase A descriptive indicators
+
+The morning ingestion run computes them after aggregation; the after-close price
+job does not — it is prices only and never runs headline analytics.
+
+| Table | Contents |
+|---|---|
+| `daily_family_signals` | per-family daily descriptive signals, plus the `__domestic__` composite |
+| `abnormal_tone_daily` | prior-only normalization by outlet, outlet×family and family |
+| `news_disagreement_daily` | dispersion and camp gaps among observed sources |
+| `news_volume_daily` | attention shocks per family and an `__all__` series |
+
+The step is fail-soft: a failure degrades the run and leaves every pre-existing
+aggregate intact. Component status appears as `indicators` in the run record.
+
+```bash
+python -c "import pipeline; print(pipeline.indicators_step(return_outcome=True))"
+python -m scripts.demo_phase_a          # offline, credential-free
+```
+
+See [FINANCIAL_INDICATORS.md](FINANCIAL_INDICATORS.md).
+
 ## Rollback
 
 ### Data branch
