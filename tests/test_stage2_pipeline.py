@@ -425,6 +425,7 @@ def test_run_all_full_success_persists_every_component(stage2_db, monkeypatch):
         "scrape": "success",
         "scoring": "success",
         "aggregation": "success",
+        "indicators": "success",
         "market_data": "success",
         "audit": "success",
     }

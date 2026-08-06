@@ -695,6 +695,193 @@ def aggregate_step(
 
 
 # -----------------------------------------------------------------------------
+# Step 3b - Phase A descriptive indicators
+# -----------------------------------------------------------------------------
+
+# A share above this suggests the taxonomy rules no longer fit the corpus, but
+# only once enough headlines have been classified for the rate to mean anything.
+# One ambiguous headline out of one is 100% and says nothing.
+AMBIGUITY_WARNING_SHARE = 0.20
+AMBIGUITY_WARNING_MIN_SAMPLE = 20
+
+
+def indicators_step(
+    db_path: str = DB_PATH,
+    *,
+    return_outcome: bool = False,
+):
+    """Derive signal families and compute the Phase A descriptive indicators.
+
+    Runs after session aggregation and reads only what that step produced. It is
+    deliberately fail-soft: descriptive indicators are additive analysis, so a
+    failure here degrades the run and leaves every existing aggregate intact
+    rather than aborting a otherwise-healthy pipeline. Nothing in this step
+    writes a sentiment score, label, detailed category or experiment identity.
+    """
+    logger.info("=== STEP 3b: Descriptive indicators ===")
+
+    warnings: List[Dict[str, Any]] = []
+    # Only conditions that mean the indicators are untrustworthy degrade the
+    # run. Ambiguous family assignments are an expected, reported property of
+    # the taxonomy, not a fault; degrading on them would fire on every healthy
+    # run and drain the status of meaning, exactly as the pending-row audit did.
+    degrading = False
+    try:
+        from config import EXPERIMENT_ID
+        from indicators.abnormal_tone import compute_abnormal_tone
+        from indicators.disagreement import compute_disagreement
+        from indicators.family_signals import (
+            FAMILY_SIGNAL_VERSION, compute_family_signal,
+        )
+        from indicators.volume_shock import compute_volume_shocks
+        from taxonomy.signal_family import SIGNAL_FAMILY_VERSION
+
+        classified = db.classify_signal_families(db_path=db_path)
+
+        frame = db.get_classified_headlines(db_path=db_path)
+        if frame.empty:
+            outcome = StepOutcome(
+                count=0, status="success",
+                details={"reason": "no eligible scored headlines"},
+            )
+            return outcome if return_outcome else 0
+
+        with db._conn(db_path) as con:
+            observed_rows = con.execute(
+                "SELECT headline_id, source FROM raw_headline_observations "
+                "WHERE headline_id IS NOT NULL"
+            ).fetchall()
+        observed_sources: Dict[int, set] = {}
+        for row in observed_rows:
+            observed_sources.setdefault(int(row["headline_id"]), set()).add(row["source"])
+
+        experiment_ids = sorted(
+            {str(value) for value in frame["experiment_id"].dropna().unique()}
+        )
+        experiment_id = experiment_ids[0] if len(experiment_ids) == 1 else EXPERIMENT_ID
+        if len(experiment_ids) > 1:
+            degrading = True
+            warnings.append(_issue(
+                "indicators", "multiple_experiment_ids_present",
+                "Indicator rows are stamped with the configured experiment id "
+                "because eligible scores span more than one identity",
+                experiment_ids=experiment_ids,
+            ))
+
+        records = frame.to_dict("records")
+
+        # -- family signals ---------------------------------------------------
+        family_rows = []
+        grouped: Dict[tuple, list] = {}
+        for record in records:
+            key = (record["signal_date"], record.get("signal_family") or "other")
+            grouped.setdefault(key, []).append(record)
+        for (session, family), group in sorted(grouped.items()):
+            family_rows.append(compute_family_signal(
+                group, signal_date=session, signal_family=family,
+                experiment_id=experiment_id, family_version=SIGNAL_FAMILY_VERSION,
+                intensity_floor=SENTIMENT_INTENSITY_FLOOR,
+                observed_sources=observed_sources,
+            ))
+
+        # Domestic-only aggregate: a separate family key, never a replacement
+        # for the existing overall daily_signal_variants table.
+        from taxonomy.signal_family import DOMESTIC_FAMILIES
+        domestic: Dict[str, list] = {}
+        for record in records:
+            if record.get("signal_family") in DOMESTIC_FAMILIES:
+                domestic.setdefault(record["signal_date"], []).append(record)
+        for session, group in sorted(domestic.items()):
+            family_rows.append(compute_family_signal(
+                group, signal_date=session, signal_family="__domestic__",
+                experiment_id=experiment_id, family_version=SIGNAL_FAMILY_VERSION,
+                intensity_floor=SENTIMENT_INTENSITY_FLOOR,
+                observed_sources=observed_sources,
+            ))
+        written_families = db.upsert_family_signals(family_rows, db_path=db_path)
+
+        # -- abnormal tone, disagreement, volume -------------------------------
+        abnormal_rows = compute_abnormal_tone(records, experiment_id=experiment_id)
+        written_abnormal = db.upsert_abnormal_tone(abnormal_rows, db_path=db_path)
+
+        from analysis.polarization.inference import (
+            DEFAULT_OPPOSITION_SOURCES, DEFAULT_PRO_GOVERNMENT_SOURCES,
+        )
+        disagreement_rows = [
+            compute_disagreement(
+                group, signal_date=session, signal_family=family,
+                experiment_id=experiment_id,
+                pro_government_sources=DEFAULT_PRO_GOVERNMENT_SOURCES,
+                opposition_sources=DEFAULT_OPPOSITION_SOURCES,
+            )
+            for (session, family), group in sorted(grouped.items())
+        ]
+        written_disagreement = db.upsert_disagreement(disagreement_rows, db_path=db_path)
+
+        volume_rows = compute_volume_shocks(
+            records, experiment_id=experiment_id, observed_sources=observed_sources,
+        )
+        written_volume = db.upsert_volume(volume_rows, db_path=db_path)
+
+        # Ambiguous assignments are reported in the coverage report and counted
+        # in daily_family_signals.ambiguous_count. A run warning is reserved for
+        # a share large enough to suggest the rules have stopped fitting the
+        # corpus, so the signal keeps meaning something when it does fire.
+        ambiguous = classified.get("ambiguous", 0)
+        total_classified = max(1, classified.get("classified", 0))
+        ambiguous_share = ambiguous / total_classified
+        details_ambiguity = {
+            "ambiguous": ambiguous, "ambiguous_share": ambiguous_share,
+        }
+        if (
+            classified.get("classified", 0) >= AMBIGUITY_WARNING_MIN_SAMPLE
+            and ambiguous_share > AMBIGUITY_WARNING_SHARE
+        ):
+            warnings.append(_issue(
+                "indicators", "ambiguous_family_share_high",
+                f"{ambiguous_share:.1%} of newly classified headlines have an "
+                f"ambiguous family assignment; review the coverage report",
+                **details_ambiguity,
+            ))
+
+        details = {
+            "classified": classified,
+            "ambiguity": details_ambiguity,
+            "family_rows": written_families,
+            "abnormal_rows": written_abnormal,
+            "disagreement_rows": written_disagreement,
+            "volume_rows": written_volume,
+            "family_version": SIGNAL_FAMILY_VERSION,
+            "family_signal_version": FAMILY_SIGNAL_VERSION,
+            "experiment_id": experiment_id,
+        }
+
+        logger.info(
+            "Indicators complete: %d family rows | %d abnormal | %d disagreement "
+            "| %d volume", written_families, written_abnormal,
+            written_disagreement, written_volume,
+        )
+        outcome = StepOutcome(
+            count=written_families,
+            status="degraded" if degrading else "success",
+            warnings=warnings, details=details,
+        )
+        return outcome if return_outcome else written_families
+
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("Descriptive indicators failed: %s", exc, exc_info=True)
+        outcome = StepOutcome(
+            count=0, status="degraded",
+            warnings=[_issue(
+                "indicators", "indicator_computation_failed",
+                "Descriptive indicators failed; existing aggregates are unchanged",
+                error=f"{type(exc).__name__}: {exc}",
+            )],
+        )
+        return outcome if return_outcome else 0
+
+
+# -----------------------------------------------------------------------------
 # Step 4 - Fetch BIST 100 prices
 # -----------------------------------------------------------------------------
 
@@ -1052,6 +1239,7 @@ def run_all(
         "scrape": "skipped" if skip_scrape else "pending",
         "scoring": "skipped" if skip_score else "pending",
         "aggregation": "skipped" if skip_aggregate else "pending",
+        "indicators": "skipped" if skip_aggregate else "pending",
         "market_data": "skipped" if skip_prices else "pending",
         "audit": "pending",
     }
@@ -1102,6 +1290,22 @@ def run_all(
                 f"  [{aggregation.status.upper()}] Aggregate - "
                 f"{aggregation.count} signal sessions computed"
             )
+
+            # Descriptive indicators run only once aggregation has succeeded,
+            # and never block it: they are additive analysis on top of the
+            # canonical tables, so a failure degrades the run without touching
+            # anything aggregation already wrote.
+            if aggregation.status != "failed":
+                active_component = "indicators"
+                component_status[active_component] = "running"
+                indicators = indicators_step(db_path=db_path, return_outcome=True)
+                component_status[active_component] = indicators.status
+                warnings.extend(indicators.warnings)
+                errors.extend(indicators.errors)
+                print(
+                    f"  [{indicators.status.upper()}] Indicators - "
+                    f"{indicators.count} family-session rows computed"
+                )
 
         price_outcome: Optional[StepOutcome] = None
         if not skip_prices:
