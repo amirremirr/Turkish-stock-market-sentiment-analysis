@@ -1,0 +1,27 @@
+signal_date,source,title,category,sentiment_score,sentiment_label,relevance,timing_bucket,event_id
+2026-06-01,Ekonomi Gazetesi,TCMB politika faizini sabit tuttu,rates_tcmb,0.10,neutral,0.95,pre_open,evt-ppk-1
+2026-06-01,Piyasa Haber,Enflasyon beklentinin altinda kaldi,turkey_macro,0.45,positive,0.90,pre_open,evt-cpi-1
+2026-06-01,Sabah Ekonomi,Bankacilik sektorunde kredi buyumesi hizlandi,banks,0.30,positive,0.85,pre_open,evt-credit-1
+2026-06-01,Sozcu Ekonomi,Bankacilik sektorunde kredi riski artiyor,banks,-0.35,negative,0.85,pre_open,evt-credit-2
+2026-06-02,Ekonomi Gazetesi,TCMB faiz indirimi sinyali verdi,rates_tcmb,0.35,positive,0.95,pre_open,evt-ppk-2
+2026-06-02,Piyasa Haber,Enflasyon verisi yukari revize edildi,turkey_macro,-0.40,negative,0.90,pre_open,evt-cpi-2
+2026-06-02,Sabah Ekonomi,Borsa gune yukselisle basladi,bist_company,0.25,positive,0.60,pre_open,evt-recap-1
+2026-06-02,Dunya,Fed faiz kararini acikladi,global_risk,-0.15,negative,0.70,post_close,evt-fed-1
+2026-06-03,Ekonomi Gazetesi,TCMB rezervleri artti,rates_tcmb,0.20,positive,0.95,pre_open,evt-res-1
+2026-06-03,Piyasa Haber,Dolar kuru sakin seyretti,fx_lira,0.05,neutral,0.90,pre_open,evt-fx-1
+2026-06-03,Sozcu Ekonomi,Issizlik orani yukseldi,turkey_macro,-0.50,negative,0.90,pre_open,evt-emp-1
+2026-06-03,Sabah Ekonomi,Garanti BBVA bilanco acikladi,banks,0.40,positive,0.80,pre_open,evt-kap-1
+2026-06-04,Ekonomi Gazetesi,TCMB para politikasi metnini yayimladi,rates_tcmb,0.05,neutral,0.95,pre_open,evt-ppk-3
+2026-06-04,Piyasa Haber,Enflasyon aylik bazda geriledi,turkey_macro,0.35,positive,0.90,pre_open,evt-cpi-3
+2026-06-04,Dunya,Kuresel piyasalarda risk istahi azaldi,global_risk,-0.30,negative,0.70,during_session,evt-glob-1
+2026-06-04,Sabah Ekonomi,BIST 100 gunu dususle tamamladi,bist_company,-0.20,negative,0.60,post_close,evt-recap-2
+2026-06-05,Ekonomi Gazetesi,TCMB faiz karari piyasayi sasirtti,rates_tcmb,-0.55,negative,0.95,pre_open,evt-ppk-4
+2026-06-05,Piyasa Haber,TCMB kararina sert tepki geldi,rates_tcmb,-0.60,negative,0.95,pre_open,evt-ppk-4
+2026-06-05,Sabah Ekonomi,TCMB karari kontrollu bir adim,rates_tcmb,0.15,neutral,0.95,pre_open,evt-ppk-4
+2026-06-05,Sozcu Ekonomi,TCMB karari ekonomiyi zorlayacak,rates_tcmb,-0.70,negative,0.95,pre_open,evt-ppk-4
+2026-06-05,Dunya,TCMB karari sonrasi kur oynak,fx_lira,-0.45,negative,0.90,during_session,evt-fx-2
+2026-06-05,Piyasa Haber,Enflasyon beklentileri bozuldu,turkey_macro,-0.50,negative,0.90,pre_open,evt-cpi-4
+2026-06-05,Ekonomi Gazetesi,Bankacilik sektoru likidite baskisi altinda,banks,-0.40,negative,0.85,pre_open,evt-credit-3
+2026-06-05,Sabah Ekonomi,Dolar gun icinde yukseldi,fx_lira,-0.25,negative,0.85,during_session,evt-recap-3
+2026-06-05,Dunya,Borsa gunu ekside kapatti,bist_company,-0.30,negative,0.60,post_close,evt-recap-4
+2026-06-05,Piyasa Haber,SPK yeni duzenleme karari aldi,bist_company,0.10,neutral,0.80,pre_open,evt-spk-1
