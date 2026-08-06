@@ -1235,14 +1235,30 @@ def run_all(
 
 
 def _processing_audit(db_path: str) -> StepOutcome:
-    """Check processing-state integrity without conflating missing and neutral."""
+    """Check processing-state integrity without conflating missing and neutral.
+
+    Eligibility is what makes a pending row a problem. A headline carrying an
+    active exclusion is deliberately never scored -- the relevance filter
+    withheld it at ingest, and the scorer skips it by design -- so counting it
+    as unresolved would mark every healthy run degraded and drain the meaning
+    from that signal. Excluded rows are reported under their own keys instead,
+    where they remain visible without raising an alarm.
+
+    Exclusions stay reversible, so a restored headline simply becomes eligible
+    again and is picked up by the next scoring pass. The processing_status of an
+    excluded row is never rewritten to make this audit pass.
+    """
     with db._conn(db_path) as con:
-        counts = {
-            str(row["processing_status"]): int(row["n"])
-            for row in con.execute(
-                "SELECT processing_status, COUNT(*) AS n FROM headlines GROUP BY processing_status"
-            )
-        }
+        rows = con.execute(
+            """SELECT h.processing_status AS status,
+                      CASE WHEN EXISTS (
+                          SELECT 1 FROM headline_exclusions AS x
+                          WHERE x.headline_id = h.id AND x.restored_at IS NULL
+                      ) THEN 'excluded' ELSE 'eligible' END AS eligibility,
+                      COUNT(*) AS n
+               FROM headlines AS h
+               GROUP BY status, eligibility"""
+        ).fetchall()
         invalid_scored = int(con.execute(
             """SELECT COUNT(*) FROM headlines
                WHERE processing_status='scored'
@@ -1250,6 +1266,29 @@ def _processing_audit(db_path: str) -> StepOutcome:
                       OR p_positive IS NULL OR p_neutral IS NULL OR p_negative IS NULL
                       OR model_name IS NULL OR scored_at IS NULL)"""
         ).fetchone()[0])
+        active_exclusions = int(con.execute(
+            "SELECT COUNT(*) FROM headline_exclusions WHERE restored_at IS NULL"
+        ).fetchone()[0])
+
+    cross: Dict[str, int] = {
+        f"{row['status']}_{row['eligibility']}": int(row["n"]) for row in rows
+    }
+    counts: Dict[str, int] = {}
+    for row in rows:
+        counts[str(row["status"])] = counts.get(str(row["status"]), 0) + int(row["n"])
+
+    detail = {
+        "scored": counts.get("scored", 0),
+        "pending_eligible": cross.get("pending_eligible", 0),
+        "retry_pending_eligible": cross.get("retry_pending_eligible", 0),
+        "failed_eligible": cross.get("failed_eligible", 0),
+        "pending_excluded": cross.get("pending_excluded", 0),
+        "retry_pending_excluded": cross.get("retry_pending_excluded", 0),
+        "failed_excluded": cross.get("failed_excluded", 0),
+        "scored_excluded": cross.get("scored_excluded", 0),
+        "active_exclusions": active_exclusions,
+        "processing_status_counts": counts,
+    }
 
     if invalid_scored:
         return StepOutcome(
@@ -1258,21 +1297,38 @@ def _processing_audit(db_path: str) -> StepOutcome:
                 "audit", "invalid_scored_state",
                 f"{invalid_scored} scored row(s) have incomplete output fields",
             )],
-            details={"processing_status_counts": counts},
+            details=detail,
         )
-    unresolved = counts.get("pending", 0) + counts.get("retry_pending", 0)
-    failed = counts.get("failed", 0)
-    if unresolved or failed:
+
+    unresolved = detail["pending_eligible"] + detail["retry_pending_eligible"]
+    failed_eligible = detail["failed_eligible"]
+    if unresolved or failed_eligible:
         return StepOutcome(
             status="degraded",
             warnings=[_issue(
                 "audit", "unresolved_processing_items",
-                f"{unresolved} pending/retry item(s) and {failed} failed item(s) remain",
-                processing_status_counts=counts,
+                f"{unresolved} eligible pending/retry item(s) and "
+                f"{failed_eligible} eligible failed item(s) remain",
+                **detail,
             )],
-            details={"processing_status_counts": counts},
+            details=detail,
         )
-    return StepOutcome(status="success", details={"processing_status_counts": counts})
+
+    withheld = detail["pending_excluded"] + detail["retry_pending_excluded"]
+    if withheld:
+        # Informational only: these are working as intended, but the count
+        # belongs in the run record so a filter regression stays visible.
+        return StepOutcome(
+            status="success",
+            warnings=[_issue(
+                "audit", "excluded_items_not_scored",
+                f"{withheld} unscored item(s) carry an active exclusion and are "
+                f"intentionally ineligible for scoring",
+                **detail,
+            )],
+            details=detail,
+        )
+    return StepOutcome(status="success", details=detail)
 
 
 def _final_run_status(component_status: Dict[str, str]) -> str:
