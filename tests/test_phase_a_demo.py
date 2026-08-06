@@ -110,12 +110,25 @@ def test_demo_makes_no_predictive_claim(demo_artifacts):
     assert "nothing here is a validated predictive signal" in notes
 
     # Claim-shaped language anywhere outside the disclaimers would be a problem.
-    body = json.dumps(
-        {key: value for key, value in summary.items() if key != "notes"}
-    ).lower()
+    # Disclaimers are stripped wherever they appear, including inside nested
+    # event briefs, so denying a claim never trips the check.
+    disclaimer_fields = {"notes", "disclaimer", "status_note", "note",
+                         "dispersion_note"}
+
+    def _strip(value):
+        if isinstance(value, dict):
+            return {
+                key: _strip(item) for key, item in value.items()
+                if key not in disclaimer_fields
+            }
+        if isinstance(value, list):
+            return [_strip(item) for item in value]
+        return value
+
+    body = json.dumps(_strip(summary), default=str).lower()
     for forbidden in ("alpha", "buy signal", "sell signal", "profitable",
                       "outperform", "validated"):
-        assert forbidden not in body, f"{forbidden!r} appears outside the notes"
+        assert forbidden not in body, f"{forbidden!r} appears outside a disclaimer"
 
 
 def test_demo_runs_quickly(tmp_path):
