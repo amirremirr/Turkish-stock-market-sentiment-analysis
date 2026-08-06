@@ -882,6 +882,176 @@ def indicators_step(
 
 
 # -----------------------------------------------------------------------------
+# Step 3c - Candidate events and the event-level research dataset
+# -----------------------------------------------------------------------------
+
+# Below this many candidate events, an empty return set is a thin corpus rather
+# than a broken market join.
+NO_RETURN_WARNING_MIN_EVENTS = 10
+
+
+def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
+    """Group headlines into candidate events and build the research dataset.
+
+    Like the indicator step this is additive analysis and fails soft: an error
+    degrades the run and leaves every existing table intact. It writes only
+    event, window, residual and dataset tables -- never a score, label,
+    category, family or experiment identity.
+
+    Prices come from settled bars only, so no window can be built across an
+    intraday snapshot.
+    """
+    logger.info("=== STEP 3c: Candidate events and research dataset ===")
+
+    warnings: List[Dict[str, Any]] = []
+    try:
+        from config import EXPERIMENT_ID
+        from events.clustering import (
+            CLUSTER_ALGORITHM_VERSION, group_candidate_events, summarise_event,
+        )
+        from events.entities import ENTITY_RULE_VERSION
+        from research.dataset import build_event_dataset, dataset_coverage
+
+        frame = db.get_classified_headlines(db_path=db_path)
+        if frame.empty:
+            outcome = StepOutcome(
+                count=0, status="success",
+                details={"reason": "no eligible scored headlines"},
+            )
+            return outcome if return_outcome else 0
+
+        records = frame.to_dict("records")
+        groups = group_candidate_events(records)
+
+        # Novelty counts how many earlier candidate groups already named the
+        # same entity, so it must be accumulated in chronological order.
+        seen_entities: Dict[str, int] = {}
+        group_rows: List[Dict[str, Any]] = []
+        mapping_rows: List[Dict[str, Any]] = []
+        entity_rows: List[Dict[str, Any]] = []
+        timing_by_group: Dict[str, Optional[str]] = {}
+
+        for group in sorted(
+            groups, key=lambda g: (g.members[0].get("published_at") or "", g.group_key)
+        ):
+            prior = seen_entities.get(group.primary_entity or "", 0)
+            summary = summarise_event(group, prior_entity_events=prior)
+            if group.primary_entity:
+                seen_entities[group.primary_entity] = prior + 1
+
+            # The most restrictive member timing governs tradability: a position
+            # could not open before the last defining headline was public.
+            order = {
+                "during_session": 0, "unknown": 1, "weekend_or_holiday": 2,
+                "post_close": 3, "pre_open": 4,
+            }
+            buckets = [
+                member.get("timing_bucket") for member in group.members
+                if member.get("timing_bucket")
+            ]
+            summary["timing_bucket"] = (
+                min(buckets, key=lambda b: order.get(b, 1)) if buckets else "unknown"
+            )
+            timing_by_group[group.group_key] = summary["timing_bucket"]
+
+            group_rows.append(summary)
+            for member in group.members:
+                mapping_rows.append({
+                    "group_key": group.group_key,
+                    "headline_id": member["headline_id"],
+                    "similarity": member["similarity"],
+                    "match_rule": member["match_rule"],
+                    "entity_overlap": member["entity_overlap"],
+                })
+            for entity_type, entity_id in sorted(group.entities):
+                entity_rows.append({
+                    "group_key": group.group_key,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "rule_version": ENTITY_RULE_VERSION,
+                })
+
+        stored = db.replace_event_groups(
+            group_rows, mapping_rows, entity_rows,
+            algorithm_version=CLUSTER_ALGORITHM_VERSION, db_path=db_path,
+        )
+
+        with db._conn(db_path) as con:
+            price_bars = [dict(row) for row in con.execute(
+                "SELECT * FROM bist100_prices ORDER BY date"
+            )]
+            factor_rows = [dict(row) for row in con.execute(
+                "SELECT date, symbol, daily_return FROM market_factors ORDER BY date"
+            )]
+
+        experiment_ids = sorted(
+            {str(v) for v in frame["experiment_id"].dropna().unique()}
+        )
+        experiment_id = experiment_ids[0] if len(experiment_ids) == 1 else EXPERIMENT_ID
+
+        built = build_event_dataset(
+            group_rows, price_bars, factor_rows,
+            experiment_id=experiment_id,
+            algorithm_version=CLUSTER_ALGORITHM_VERSION,
+        )
+        db.upsert_event_return_windows(built["windows"], db_path=db_path)
+        db.upsert_control_residuals(built["residuals"], db_path=db_path)
+        db.upsert_event_dataset(built["dataset"], db_path=db_path)
+
+        coverage = dataset_coverage(built["dataset"])
+        singletons = sum(row["is_singleton"] for row in group_rows)
+        single_source = sum(row["is_single_source"] for row in group_rows)
+
+        # Zero tradable windows is only meaningful once there were enough
+        # candidate events to expect one; on a thin corpus it says nothing.
+        if (
+            coverage["distinct_events"] >= NO_RETURN_WARNING_MIN_EVENTS
+            and coverage["rows_with_return"] == 0
+        ):
+            warnings.append(_issue(
+                "events", "no_timing_safe_returns",
+                "No candidate event produced an available return window",
+                **coverage,
+            ))
+
+        details = {
+            "algorithm_version": CLUSTER_ALGORITHM_VERSION,
+            "groups": stored["groups"],
+            "mappings": stored["mappings"],
+            "entities": stored["entities"],
+            "singleton_groups": singletons,
+            "single_source_groups": single_source,
+            "windows": len(built["windows"]),
+            "residuals": len(built["residuals"]),
+            "coverage": coverage,
+            "experiment_id": experiment_id,
+        }
+        logger.info(
+            "Events complete: %d candidate groups (%d singleton, %d single-source) "
+            "| %d windows | %d dataset rows",
+            stored["groups"], singletons, single_source,
+            len(built["windows"]), len(built["dataset"]),
+        )
+        outcome = StepOutcome(
+            count=stored["groups"], status="success",
+            warnings=warnings, details=details,
+        )
+        return outcome if return_outcome else stored["groups"]
+
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("Event dataset failed: %s", exc, exc_info=True)
+        outcome = StepOutcome(
+            count=0, status="degraded",
+            warnings=[_issue(
+                "events", "event_dataset_failed",
+                "Candidate-event construction failed; existing tables are unchanged",
+                error=f"{type(exc).__name__}: {exc}",
+            )],
+        )
+        return outcome if return_outcome else 0
+
+
+# -----------------------------------------------------------------------------
 # Step 4 - Fetch BIST 100 prices
 # -----------------------------------------------------------------------------
 
@@ -1240,6 +1410,7 @@ def run_all(
         "scoring": "skipped" if skip_score else "pending",
         "aggregation": "skipped" if skip_aggregate else "pending",
         "indicators": "skipped" if skip_aggregate else "pending",
+        "events": "skipped" if skip_aggregate else "pending",
         "market_data": "skipped" if skip_prices else "pending",
         "audit": "pending",
     }
@@ -1305,6 +1476,17 @@ def run_all(
                 print(
                     f"  [{indicators.status.upper()}] Indicators - "
                     f"{indicators.count} family-session rows computed"
+                )
+
+                active_component = "events"
+                component_status[active_component] = "running"
+                events_outcome = events_step(db_path=db_path, return_outcome=True)
+                component_status[active_component] = events_outcome.status
+                warnings.extend(events_outcome.warnings)
+                errors.extend(events_outcome.errors)
+                print(
+                    f"  [{events_outcome.status.upper()}] Events - "
+                    f"{events_outcome.count} candidate event groups"
                 )
 
         price_outcome: Optional[StepOutcome] = None

@@ -307,3 +307,98 @@ table.drivers td.title { max-width:340px; }
 .null { color:#8a97a3; font-style:italic; }
 .legend { font-size:11px; color:#5a6b7d; margin-top:8px; line-height:1.6; }
 """
+
+
+# -- Candidate events ----------------------------------------------------------
+
+def render_event_section(
+    events: "pd.DataFrame",
+    briefs: list,
+    *,
+    algorithm_version: str = "",
+) -> str:
+    """Render candidate-event exploration and briefs.
+
+    The wording never upgrades an algorithmic grouping into a verified event,
+    every group shows its review state and data-quality warnings, and no
+    recommendation of any kind is produced.
+    """
+
+    if events is None or events.empty:
+        return (
+            '<section class="card"><h2>Candidate Events</h2>'
+            '<p class="null">No candidate event groups are stored yet.</p>'
+            '</section>'
+        )
+
+    ranked = events.sort_values(
+        ["source_count", "headline_count"], ascending=False
+    ).head(25)
+
+    rows = []
+    for _, row in ranked.iterrows():
+        warnings = []
+        if int(row.get("is_single_source") or 0):
+            warnings.append("single source")
+        if int(row.get("is_singleton") or 0):
+            warnings.append("single headline")
+        if int(row.get("signal_date_span") or 1) > 1:
+            warnings.append("spans sessions")
+        if int(row.get("unknown_timestamp_count") or 0):
+            warnings.append("unknown time")
+        rows.append(f"""
+    <tr>
+      <td><code>{_esc(str(row.get("group_key"))[-12:])}</code></td>
+      <td>{_esc(row.get("event_type") or "unclassified")}</td>
+      <td>{_esc(FAMILY_LABELS.get(row.get("signal_family"), row.get("signal_family")))}</td>
+      <td>{_esc(row.get("primary_entity") or "none")}</td>
+      <td>{_esc(row.get("first_seen_at"))}</td>
+      <td>{_esc(row.get("signal_date"))}</td>
+      <td>{int(row.get("source_count") or 0)}</td>
+      <td>{int(row.get("headline_count") or 0)}</td>
+      <td>{_num(row.get("mean_sentiment"), signed=True)}
+          <span class="tag">{_tone_label(row.get("mean_sentiment"))}</span></td>
+      <td>{_num(row.get("cross_source_dispersion"))}</td>
+      <td>{_num(row.get("novelty"), 2)}</td>
+      <td><span class="suff suff-{_esc(row.get("review_state"))}">
+          {_esc(row.get("review_state"))}</span></td>
+      <td>{_esc(", ".join(warnings) or "-")}</td>
+    </tr>""")
+
+    return f"""
+<section class="card" id="candidate-events">
+  <h2>Candidate Events</h2>
+  <p class="sub">
+    <strong>These are algorithmic groupings, not verified real-world events.</strong>
+    Headlines are grouped by shared entity, signal family, time proximity and
+    normalized-title similarity. Every grouping keeps its similarity score and
+    rule, and none has been human-reviewed unless marked confirmed.
+  </p>
+  <p class="sub versions">algorithm <code>{_esc(algorithm_version)}</code></p>
+  <div class="table-scroll">
+  <table class="regime">
+    <thead><tr>
+      <th>Group</th><th>Type</th><th>Family</th><th>Entity</th>
+      <th>First seen</th><th>First reactable</th><th>Sources</th>
+      <th>Headlines</th><th>Tone</th><th>Outlet spread</th><th>Novelty</th>
+      <th>Review</th><th>Quality</th>
+    </tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table>
+  </div>
+  <p class="legend">
+    <strong>Outlet spread</strong> is disagreement among the outlets that
+    covered the group, not market uncertainty. <strong>Novelty</strong> reflects
+    how often the entity has already produced a candidate group, not whether the
+    news is new. <em>n/a</em> means a value could not be defensibly computed.
+    No trading recommendation is shown.
+  </p>
+</section>
+"""
+
+
+EVENT_CSS = """
+.suff-unreviewed { background:#eef2f7; color:#3b4c5e; }
+.suff-confirmed { background:#e6f4ea; color:#1e4620; }
+.suff-rejected { background:#f3e6e6; color:#6b1e1e; }
+"""

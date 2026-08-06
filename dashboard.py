@@ -19,7 +19,7 @@ from datetime import datetime
 import pandas as pd
 
 import database as db
-from dashboard_regime import REGIME_CSS
+from dashboard_regime import EVENT_CSS, REGIME_CSS
 from config import DB_PATH, MINIMUM_HEADLINES_PER_DAY, MINIMUM_OVERLAP_DAYS
 
 logger = logging.getLogger(__name__)
@@ -148,6 +148,24 @@ def _regime_html(db_path: str) -> str:
         )
 
 
+def _events_html(db_path: str) -> str:
+    """Build the candidate-event fragment, degrading visibly on failure."""
+    try:
+        from dashboard_regime import render_event_section
+
+        events = db.read_table("event_groups", db_path)
+        if events.empty:
+            return render_event_section(events, [])
+        version = str(events["algorithm_version"].iloc[-1])
+        return render_event_section(events, [], algorithm_version=version)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("Candidate-event section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>Candidate Events</h2>'
+            '<p class="null">This section could not be rendered.</p></section>'
+        )
+
+
 # -- Rendering helpers -----------------------------------------------------------
 
 def _mood(score: float) -> tuple[str, str, str]:
@@ -191,6 +209,7 @@ _CAT_LABELS = {
 def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     d = _collect(db_path)
     regime_html = _regime_html(db_path)
+    events_html = _events_html(db_path)
 
     # -- Chart data --
     labels   = [r["date"][5:] for r in d["sent"]]              # MM-DD
@@ -266,7 +285,8 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         "__CAT_LABELS__":  json.dumps(cat_labels, ensure_ascii=False),
         "__CAT_COUNTS__":  json.dumps(cat_counts),
         "__REGIME__":      regime_html,
-        "__REGIME_CSS__":  REGIME_CSS,
+        "__REGIME_CSS__":  REGIME_CSS + EVENT_CSS,
+        "__EVENTS__":      events_html,
     }.items():
         html = html.replace(key, val)
 
@@ -421,6 +441,7 @@ new Chart(document.getElementById('catChart'), {
 });
 </script>
 __REGIME__
+__EVENTS__
 </body>
 </html>
 """

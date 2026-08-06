@@ -21,6 +21,11 @@ from indicators.abnormal_tone import compute_abnormal_tone
 from indicators.disagreement import compute_disagreement
 from indicators.family_signals import compute_family_signal
 from indicators.volume_shock import compute_volume_shocks
+from events.briefs import build_event_brief
+from events.clustering import (
+    CLUSTER_ALGORITHM_VERSION, group_candidate_events, summarise_event,
+)
+from research.dataset import build_event_dataset, dataset_coverage
 from taxonomy.market_recap import classify_market_recap
 from taxonomy.signal_family import (
     DOMESTIC_FAMILIES, SIGNAL_FAMILY_VERSION, assign_signal_family,
@@ -131,6 +136,48 @@ def run_demo(
         key=lambda r: r["sentiment_score"], reverse=True,
     )
 
+    # -- candidate events and timing-safe market windows --------------------
+    groups = group_candidate_events(records)
+    event_rows = []
+    for group in groups:
+        row = summarise_event(group)
+        buckets = [m.get("timing_bucket") for m in group.members if m.get("timing_bucket")]
+        order = {"during_session": 0, "unknown": 1, "weekend_or_holiday": 2,
+                 "post_close": 3, "pre_open": 4}
+        row["timing_bucket"] = (
+            min(buckets, key=lambda b: order.get(b, 1)) if buckets else "unknown"
+        )
+        event_rows.append(row)
+
+    demo_bars = [
+        {"date": "2026-06-01", "open": 100.0, "close": 101.5, "bar_status": "complete"},
+        {"date": "2026-06-02", "open": 101.5, "close": 100.8, "bar_status": "complete"},
+        {"date": "2026-06-03", "open": 100.8, "close": 102.4, "bar_status": "complete"},
+        {"date": "2026-06-04", "open": 102.4, "close": 101.1, "bar_status": "complete"},
+        {"date": "2026-06-05", "open": 101.1, "close": 99.6, "bar_status": "complete"},
+        # A provisional bar the window builder must refuse to use.
+        {"date": "2026-06-08", "open": 99.6, "close": 99.9, "bar_status": "provisional"},
+    ]
+    built = build_event_dataset(
+        event_rows, demo_bars, [], experiment_id=EXPERIMENT_ID,
+        algorithm_version=CLUSTER_ALGORITHM_VERSION,
+    )
+    coverage = dataset_coverage(built["dataset"])
+
+    windows_by_group = {}
+    for window in built["windows"]:
+        windows_by_group.setdefault(window["group_key"], []).append(window)
+
+    largest = max(event_rows, key=lambda row: row["headline_count"])
+    largest_members = next(
+        g for g in groups if g.group_key == largest["group_key"]
+    ).members
+    example_brief = build_event_brief(
+        {**largest, "algorithm_version": CLUSTER_ALGORITHM_VERSION},
+        largest_members,
+        windows_by_group.get(largest["group_key"], []),
+    )
+
     summary = {
         "as_of": latest,
         "sessions": sessions,
@@ -172,8 +219,23 @@ def run_demo(
             }
             for r in drivers
         ],
+        "candidate_events": {
+            "algorithm_version": CLUSTER_ALGORITHM_VERSION,
+            "group_count": len(event_rows),
+            "singleton_groups": sum(r["is_singleton"] for r in event_rows),
+            "multi_source_groups": sum(
+                1 for r in event_rows if (r["source_count"] or 0) > 1
+            ),
+            "status_note": (
+                "Algorithmic groupings, not verified real-world events."
+            ),
+        },
+        "example_event_brief": example_brief,
+        "market_window_coverage": coverage,
         "notes": [
             "Descriptive only. Nothing here is a validated predictive signal.",
+            "Candidate event groups are algorithmic, not verified real-world events.",
+            "Provisional price bars are excluded from every return window.",
             "NULL means the value could not be defensibly computed, most often "
             "for want of prior history or independent sources.",
             "Market recap is retained for attention analysis and excluded from "
