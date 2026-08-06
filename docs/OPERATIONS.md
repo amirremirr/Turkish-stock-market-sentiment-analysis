@@ -169,6 +169,26 @@ python -m scripts.demo_phase_a          # offline, credential-free
 
 See [FINANCIAL_INDICATORS.md](FINANCIAL_INDICATORS.md).
 
+## Candidate events and research dataset
+
+Computed by the morning run after the descriptive indicators; the after-close
+price job never runs them. Component status appears as `events`.
+
+| Table | Contents |
+|---|---|
+| `event_groups` / `event_headline_map` / `event_group_entities` | candidate groups and their evidence |
+| `event_group_audit` | append-only manual review (split, merge, confirm, reject) |
+| `event_return_windows` | timing-matched windows over settled bars only |
+| `control_residual_returns` | residuals per session, window and control set |
+| `event_research_dataset` | one row per event and window |
+
+```bash
+python -c "import pipeline; print(pipeline.events_step(return_outcome=True))"
+```
+
+Regrouping replaces rows for the current algorithm version only and never
+touches the review audit. See [EVENT_MODEL.md](EVENT_MODEL.md).
+
 ## Rollback
 
 ### Data branch

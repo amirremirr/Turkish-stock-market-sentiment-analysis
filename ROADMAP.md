@@ -151,6 +151,20 @@ No scoring prompt changed, no historical score, label, detailed category or
 experiment identity was modified, and the predictive result remains exploratory
 and null. See [docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md).
 
+## Event-centric market research dataset - completed
+
+Completed 2026-08-06. Deterministic candidate-event grouping with retained
+similarity evidence and an append-only manual-review audit; entity and
+event-type metadata; first-seen and first-reactable timestamps; event-level
+tone, breadth, novelty and disagreement; machine-readable event briefs; timing
+-matched pre-open, post-close and next-session market windows over settled bars
+only; separated tradable and contemporaneous control sets with rolling
+prior-window residuals; explicit blocked states for intraday, consensus and KAP
+data; and a versioned event-level research dataset.
+
+No predictive model, trading strategy or frozen research protocol exists. See
+[docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+
 ## Approved decisions - implemented in Phase A
 
 These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**

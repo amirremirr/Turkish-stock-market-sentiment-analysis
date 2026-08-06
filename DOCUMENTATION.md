@@ -328,6 +328,24 @@ described, and reports NULL rather than a fabricated zero when history or
 independent sources are insufficient. Full detail in
 [docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md).
 
+### Candidate events and market targets
+
+After the descriptive indicators the pipeline groups headlines into candidate
+event groups by shared normalized entity, signal family, time proximity and
+normalized-title similarity, retaining every similarity score and match rule.
+These are algorithmic groupings, not verified real-world events, and manual
+split/merge review is appended to an append-only audit rather than applied to
+the grouping.
+
+Timing-matched market windows are then built over settled price bars only, each
+recording its information cutoff, assumed execution timestamp and the exact
+price fields used. During-session and unknown-time events are blocked with a
+stated reason and retained for descriptive work. Control sets separate tradable
+lagged inputs from contemporaneous descriptive ones, and residuals come from a
+rolling prior window. The result is `event_research_dataset`, one row per event
+and window, ready for a later walk-forward stage. Full detail in
+[docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+
 ### Run status and unscored headlines
 
 The processing audit distinguishes eligibility from processing status. Only pending, retry or failed rows *without* an active exclusion count as unresolved and degrade a run. Headlines withheld by the relevance filter at ingest are deliberately never scored; they are reported under `pending_excluded`/`scored_excluded` with an informational warning so a filter regression stays visible, but they do not degrade the run. Their `processing_status` is never rewritten to make the audit pass, and exclusions stay reversible.

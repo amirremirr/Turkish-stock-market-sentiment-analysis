@@ -114,6 +114,23 @@ This map reports behavioral evidence, not a test-count badge. "Covered" means de
 | The regime report becomes non-deterministic or makes causal claims | **Covered** | `::test_regime_report_is_deterministic` compares two serialized builds; `::test_demo_makes_no_predictive_claim` forbids claim-shaped language outside the disclaimers. | Wording checks are lexical; they cannot detect an unsupported inference expressed in new words. |
 | The demo needs a key, network, model or private database | **Covered** | `tests/test_phase_a_demo.py` blocks sockets during the run and asserts determinism, capability coverage, NULL visibility and a runtime bound. | The demo proves mechanics on a fixture, not validity on the real corpus. |
 
+## Event-dataset risks (2026-08-06)
+
+| Risk | Coverage | Regression evidence | Residual risk |
+|---|---|---|---|
+| A recurring headline chains into one long-running pseudo-event | **Covered** | `tests/test_event_dataset.py::test_a_daily_recurring_headline_does_not_chain_across_months` feeds fifteen consecutive daily headlines and requires no group to outlive its window. | The window is a convention; genuinely multi-day stories are split at its boundary. |
+| Grouping depends on input order | **Covered** | `::test_grouping_is_deterministic_regardless_of_input_order` compares forward and reversed input. | Determinism is proven for ordering, not across dictionary revisions, which is why the algorithm version is stored. |
+| Unrelated headlines merge | **Covered** | `::test_different_families_never_group` and `::test_distant_headlines_do_not_group` pin the family and time gates. | Lexical similarity cannot detect a shared topic expressed in different words; such cases stay separate singletons. |
+| Similarity evidence is lost | **Covered** | `::test_similarity_evidence_is_retained` requires a score, rule and algorithm version on every mapping. | None for the tested path. |
+| A group of one outlet is read as corroboration | **Covered** | `::test_single_source_group_is_flagged` and `::test_summary_reports_cross_source_dispersion_only_with_two_voices` require NULL dispersion for one voice. | None for the tested path. |
+| Manual review silently rewrites the algorithm's output | **Covered** | `::test_manual_split_and_merge_are_appended_not_applied`, `::test_event_group_audit_is_append_only` and `::test_regrouping_preserves_manual_audit_history`. | None for the tested path. |
+| A return is used that could not have been earned | **Covered** | `::test_pre_open_uses_same_session_open_to_close`, `::test_post_close_cannot_act_before_the_next_open`, `::test_during_session_is_blocked_for_want_of_intraday_data` and a parametrized eligibility table. | Windows assume fills at the open or close; slippage and impact are a later phase's concern. |
+| A provisional bar enters a return | **Covered** | `::test_provisional_bars_are_never_used` proves settled-only visibility. | None for the tested path. |
+| A contemporaneous control is used as if tradable | **Covered** | `::test_control_sets_declare_tradability` and `::test_control_panel_materialises_lagged_values` separate the two kinds and pin the lag. | The schema labels the distinction; enforcement at the point of use belongs to the future protocol. |
+| Residuals leak the future through a full-sample beta | **Covered** | `::test_residuals_use_a_rolling_prior_window_only` requires the estimation window to end strictly before the described date and NULL below the minimum. | Rolling windows are short at current coverage, so most lagged residuals are NULL. |
+| A brief overstates what a group is | **Covered** | `::test_brief_never_claims_a_verified_event` requires candidate wording and forbids recommendation language outside disclaimers. | Lexical checks cannot detect an unsupported inference in new words. |
+| The event step breaks the run | **Covered** | `::test_events_step_fails_soft` injects a failure and requires existing tables to survive. | Fail-soft covers exceptions inside the step. |
+
 ## Risks intentionally remaining
 
 | Risk | Current evidence | Required next work |
