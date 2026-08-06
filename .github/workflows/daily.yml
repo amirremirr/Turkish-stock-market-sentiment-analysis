@@ -22,7 +22,9 @@ permissions:
   contents: write               # default GITHUB_TOKEN may push the data branch
 
 concurrency:
-  group: daily-pipeline         # never two runs writing the DB at once
+  # SHARED with after_close_prices.yml. Both jobs write the same SQLite file
+  # and force-push the same branch, so they must queue rather than overlap.
+  group: bist-database-writer
   cancel-in-progress: false
 
 jobs:

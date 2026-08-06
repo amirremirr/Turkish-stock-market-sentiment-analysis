@@ -1,0 +1,116 @@
+name: after-close-prices
+
+# Settle the day's BIST bar after the Istanbul close.
+#
+# The morning ingestion run (daily.yml) fires before the open, so the bar it
+# stores for the current session is provisional by construction. This job comes
+# back after the close and promotes it to complete.
+#
+# PRICES ONLY: no feed is scraped, no LLM is called, and no headline, score,
+# experiment identity, exclusion or event row is modified. A failure here can
+# cost price freshness and nothing else.
+#
+# The cron is a coarse trigger, not the decision. A UTC cron drifts an hour
+# against Istanbul across daylight-saving changes and GitHub fires schedules
+# late, so scripts/after_close_refresh.py re-checks the real session close --
+# including official half-day early closes -- and no-ops if the market has not
+# settled.
+
+on:
+  schedule:
+    # 16:10 UTC. BIST closes 18:10 Istanbul (15:10 UTC) and the configured
+    # safety delay is 30 minutes, so this sits an hour past settlement even
+    # when Istanbul is at UTC+3 year-round. The runtime guard decides.
+    - cron: "10 16 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write               # push the data branch
+
+concurrency:
+  # SHARED with daily.yml. Both jobs write the same SQLite file and force-push
+  # the same branch, so they must never overlap. Queue rather than cancel: a
+  # cancelled run mid-write would leave the snapshot unpublished.
+  group: bist-database-writer
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo (main)
+        uses: actions/checkout@v4
+
+      - name: Check the Istanbul settlement guard
+        id: guard
+        run: |
+          python -m scripts.after_close_refresh --check-only --json-out guard.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          decision = json.load(open("guard.json"))["decision"]
+          print(f"allowed={str(decision['allowed']).lower()}")
+          print(f"reason={decision['reason']}")
+          PY
+
+      - name: Restore DB from data branch
+        if: steps.guard.outputs.allowed == 'true'
+        run: |
+          if git fetch origin data 2>/dev/null; then
+            git checkout origin/data -- finance_sentiment.db \
+              && echo "Restored DB from data branch." \
+              || echo "data branch has no DB file yet - nothing to refresh."
+          else
+            echo "data branch does not exist yet - nothing to refresh."
+          fi
+
+      - name: Set up Python
+        if: steps.guard.outputs.allowed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install slim deps (no torch, no LLM)
+        if: steps.guard.outputs.allowed == 'true'
+        run: pip install -r requirements-cloud.txt
+
+      # No OPENAI_API_KEY is exposed to this job: the scorer cannot run here
+      # even if a future edit tried to call it.
+      - name: Refresh prices and market factors
+        if: steps.guard.outputs.allowed == 'true'
+        run: python -m scripts.after_close_refresh --json-out refresh.json
+
+      - name: Guard against publishing a stale snapshot
+        if: steps.guard.outputs.allowed == 'true'
+        run: |
+          git fetch origin data:refs/remotes/origin/data || true
+          python -m scripts.guard_db_snapshot finance_sentiment.db \
+            --reference-git origin/data
+
+      # Only the database is published. README figures are never regenerated
+      # or committed by this workflow.
+      - name: Persist DB to data branch
+        if: steps.guard.outputs.allowed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git show origin/data:sentiment_vs_bist100.png > chart_carryover.png 2>/dev/null; then
+            echo "Carrying the existing chart over unchanged."
+          else
+            rm -f chart_carryover.png
+          fi
+          git checkout --orphan data-snapshot
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          if [ -f chart_carryover.png ]; then
+            mv chart_carryover.png sentiment_vs_bist100.png
+            git add -f sentiment_vs_bist100.png
+          fi
+          git add -f finance_sentiment.db
+          git commit -m "data snapshot (after-close prices) $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f origin data-snapshot:data
+
+      - name: Report skip
+        if: steps.guard.outputs.allowed != 'true'
+        run: |
+          echo "Skipped: ${{ steps.guard.outputs.reason }}"
+          echo "The market has not settled, or today is not a trading day."
