@@ -89,16 +89,24 @@ def fingerprint(db_path: str) -> Dict[str, Any]:
                FROM experiment_assignment_audit ORDER BY assignment_id"""
         ))
 
+        # Both digests below are scoped to the reviewed cohort rather than to
+        # the whole table. The corpus grows every run, so a whole-table digest
+        # would change on ordinary ingestion and the check would cry wolf until
+        # nobody read it. Scoping to the fixed historical set means a change
+        # here always means something was rewritten.
         observations_present = con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='raw_headline_observations'"
         ).fetchone() is not None
         if observations_present:
             observations_digest = _digest_rows(con.execute(
-                """SELECT observation_id, observation_key, headline_id, source,
-                          title, url, published_at, observed_at
-                   FROM raw_headline_observations ORDER BY observation_id"""
-            ))
+                f"""SELECT observation_id, observation_key, headline_id, source,
+                           title, url, published_at, observed_at
+                    FROM raw_headline_observations
+                    WHERE headline_id IN ({placeholders})
+                    ORDER BY observation_id""",
+                ids,
+            )) if ids else None
             observations_count = int(con.execute(
                 "SELECT COUNT(*) FROM raw_headline_observations"
             ).fetchone()[0])
@@ -107,8 +115,10 @@ def fingerprint(db_path: str) -> Dict[str, Any]:
             observations_count = 0
 
         category_digest = _digest_rows(con.execute(
-            "SELECT id, category FROM headlines ORDER BY id"
-        ))
+            f"SELECT id, category FROM headlines WHERE id IN ({placeholders})"
+            " ORDER BY id",
+            ids,
+        )) if ids else _digest_rows([])
         headline_count = int(
             con.execute("SELECT COUNT(*) FROM headlines").fetchone()[0]
         )
@@ -159,14 +169,30 @@ def compare(baseline: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]
         current["experiment_assignment_audit_digest"],
     )
     check(
-        "raw_headline_observations digest",
+        "raw observations for the reviewed cohort",
         baseline["raw_headline_observations_digest"],
         current["raw_headline_observations_digest"],
     )
     check(
-        "detailed category digest",
+        "detailed categories for the reviewed cohort",
         baseline["category_digest"], current["category_digest"],
     )
+    # The corpus is expected to grow; it must never shrink.
+    checks.append({
+        "check": "corpus did not lose headlines",
+        "passed": current["headline_count"] >= baseline["headline_count"],
+        "expected": f">= {baseline['headline_count']}",
+        "actual": current["headline_count"],
+    })
+    checks.append({
+        "check": "raw observations were not removed",
+        "passed": (
+            current["raw_headline_observations_count"]
+            >= baseline["raw_headline_observations_count"]
+        ),
+        "expected": f">= {baseline['raw_headline_observations_count']}",
+        "actual": current["raw_headline_observations_count"],
+    })
     for relative in sorted(baseline["reported_artifacts"]):
         check(
             f"reported artifact unchanged: {relative}",
