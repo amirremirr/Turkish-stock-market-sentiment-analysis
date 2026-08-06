@@ -262,6 +262,100 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_headline_exclusions_one_active
 CREATE INDEX IF NOT EXISTS idx_headline_exclusions_history
     ON headline_exclusions(headline_id, excluded_at);
 
+-- Phase A descriptive indicators. All keyed by the versions that produced them,
+-- so a rule change creates new rows instead of silently rewriting history.
+CREATE TABLE IF NOT EXISTS daily_family_signals (
+    signal_date            TEXT NOT NULL,
+    signal_family          TEXT NOT NULL,
+    experiment_id          TEXT NOT NULL,
+    family_version         TEXT NOT NULL,
+    simple_mean            REAL,
+    relevance_weighted     REAL,
+    median_sentiment       REAL,
+    min_sentiment          REAL,
+    max_sentiment          REAL,
+    sentiment_std          REAL,
+    headline_count         INTEGER NOT NULL,
+    source_count           INTEGER NOT NULL,
+    positive_share         REAL,
+    neutral_share          REAL,
+    negative_share         REAL,
+    avg_relevance          REAL,
+    market_recap_count     INTEGER NOT NULL DEFAULT 0,
+    unknown_timing_count   INTEGER NOT NULL DEFAULT 0,
+    excluded_count         INTEGER NOT NULL DEFAULT 0,
+    unresolved_count       INTEGER NOT NULL DEFAULT 0,
+    ambiguous_count        INTEGER NOT NULL DEFAULT 0,
+    sample_sufficiency     TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    PRIMARY KEY (signal_date, signal_family, experiment_id, family_version)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_family_signals_family
+    ON daily_family_signals(signal_family, signal_date);
+
+-- Prior-only normalization. scope is outlet | outlet_family | family.
+CREATE TABLE IF NOT EXISTS abnormal_tone_daily (
+    signal_date       TEXT NOT NULL,
+    scope             TEXT NOT NULL,
+    scope_key         TEXT NOT NULL,
+    experiment_id     TEXT NOT NULL,
+    window_sessions   INTEGER NOT NULL,
+    min_history       INTEGER NOT NULL,
+    observed_mean     REAL,
+    prior_mean        REAL,
+    prior_std         REAL,
+    prior_count       INTEGER NOT NULL,
+    abnormal_tone     REAL,
+    rolling_z         REAL,
+    rolling_percentile REAL,
+    method_version    TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    PRIMARY KEY (signal_date, scope, scope_key, experiment_id, window_sessions, method_version)
+);
+
+CREATE TABLE IF NOT EXISTS news_disagreement_daily (
+    signal_date          TEXT NOT NULL,
+    signal_family        TEXT NOT NULL,
+    experiment_id        TEXT NOT NULL,
+    headline_count       INTEGER NOT NULL,
+    source_count         INTEGER NOT NULL,
+    within_day_std       REAL,
+    cross_outlet_std     REAL,
+    max_minus_min        REAL,
+    strong_positive_share REAL,
+    strong_negative_share REAL,
+    sentiment_entropy    REAL,
+    camp_gap             REAL,
+    camp_gap_sources     INTEGER,
+    official_vs_media_gap REAL,
+    min_sources_met      INTEGER NOT NULL,
+    method_version       TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    PRIMARY KEY (signal_date, signal_family, experiment_id, method_version)
+);
+
+CREATE TABLE IF NOT EXISTS news_volume_daily (
+    signal_date       TEXT NOT NULL,
+    signal_family     TEXT NOT NULL,
+    experiment_id     TEXT NOT NULL,
+    headline_count    INTEGER NOT NULL,
+    observation_count INTEGER NOT NULL,
+    source_breadth    INTEGER NOT NULL,
+    window_sessions   INTEGER NOT NULL,
+    min_history       INTEGER NOT NULL,
+    prior_mean        REAL,
+    prior_std         REAL,
+    prior_count       INTEGER NOT NULL,
+    volume_z          REAL,
+    volume_percentile REAL,
+    change_1          REAL,
+    change_5          REAL,
+    change_20         REAL,
+    method_version    TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    PRIMARY KEY (signal_date, signal_family, experiment_id, window_sessions, method_version)
+);
+
 -- Reviewed reconstruction of legacy score provenance. Append-only by trigger:
 -- an assignment and a later rollback are two rows, never an edit of one, so the
 -- reconstruction history of any headline stays readable after the fact.
@@ -361,6 +455,19 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("bist100_prices", "bar_observed_at",  "TEXT"),
     ("bist100_prices", "bar_review_reason", "TEXT"),
     ("bist100_prices", "bar_rule_version", "TEXT"),
+    # Phase A derived classification. The detailed `category` column is frozen;
+    # these are derived beside it and carry their own versions.
+    ("headlines", "signal_family",         "TEXT"),
+    ("headlines", "signal_family_version", "TEXT"),
+    ("headlines", "signal_family_rule",    "TEXT"),
+    ("headlines", "signal_family_evidence", "TEXT"),
+    ("headlines", "signal_family_ambiguous", "INTEGER NOT NULL DEFAULT 0"),
+    ("headlines", "signal_family_review",  "TEXT"),
+    ("headlines", "is_market_recap",       "INTEGER"),
+    ("headlines", "market_recap_version",  "TEXT"),
+    ("headlines", "market_recap_rule",     "TEXT"),
+    ("headlines", "market_recap_evidence", "TEXT"),
+    ("headlines", "market_recap_confidence", "REAL"),
 ]
 
 
@@ -1341,6 +1448,193 @@ def rollback_reviewed_legacy_experiment_id(db_path: str = DB_PATH) -> Dict[str, 
         "diverged_headline_ids": diverged[:20],
         "reverted_at": now if reverted else None,
     }
+
+
+# -- Phase A derived classification --------------------------------------------
+
+def classify_signal_families(
+    db_path: str = DB_PATH,
+    *,
+    force: bool = False,
+) -> Dict[str, int]:
+    """Derive market-recap and signal-family labels for headlines.
+
+    Both layers are derived from the frozen ``category`` and ``title``. Nothing
+    here writes a sentiment score, label, category, model name or experiment
+    identity -- a family is an interpretation laid beside the measurement, never
+    a change to it.
+
+    Only rows whose stored versions differ from the current ones are touched, so
+    a repeat call is a no-op and a rule revision reclassifies exactly the rows
+    that need it.
+    """
+    from taxonomy.market_recap import MARKET_RECAP_VERSION, classify_market_recap
+    from taxonomy.signal_family import SIGNAL_FAMILY_VERSION, assign_signal_family
+
+    with _conn(db_path) as con:
+        if force:
+            rows = con.execute(
+                "SELECT id, title, category FROM headlines ORDER BY id"
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """SELECT id, title, category FROM headlines
+                   WHERE COALESCE(signal_family_version, '') <> ?
+                      OR COALESCE(market_recap_version, '') <> ?
+                   ORDER BY id""",
+                (SIGNAL_FAMILY_VERSION, MARKET_RECAP_VERSION),
+            ).fetchall()
+
+        counts = {"classified": 0, "market_recap": 0, "ambiguous": 0}
+        updates = []
+        for row in rows:
+            recap = classify_market_recap(row["title"])
+            family = assign_signal_family(
+                row["category"], row["title"], is_market_recap=recap.is_market_recap
+            )
+            counts["classified"] += 1
+            counts["market_recap"] += recap.as_int
+            counts["ambiguous"] += 1 if family.ambiguous else 0
+            updates.append((
+                family.signal_family, family.signal_family_version, family.rule,
+                family.evidence, 1 if family.ambiguous else 0, family.review_reason,
+                recap.as_int, recap.version, recap.rule, recap.evidence,
+                recap.confidence, row["id"],
+            ))
+        if updates:
+            con.executemany(
+                """UPDATE headlines
+                   SET signal_family=?, signal_family_version=?,
+                       signal_family_rule=?, signal_family_evidence=?,
+                       signal_family_ambiguous=?, signal_family_review=?,
+                       is_market_recap=?, market_recap_version=?,
+                       market_recap_rule=?, market_recap_evidence=?,
+                       market_recap_confidence=?
+                   WHERE id=?""",
+                updates,
+            )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_headlines_signal_family "
+            "ON headlines(signal_family, signal_date)"
+        )
+    logger.info(
+        "Signal families: classified %d headline(s), %d market recap, %d ambiguous",
+        counts["classified"], counts["market_recap"], counts["ambiguous"],
+    )
+    return counts
+
+
+def get_classified_headlines(
+    db_path: str = DB_PATH,
+    *,
+    eligible_only: bool = True,
+) -> pd.DataFrame:
+    """Load scored headlines with their derived family and recap fields."""
+
+    exclusion_clause = (
+        """AND NOT EXISTS (SELECT 1 FROM headline_exclusions AS x
+                           WHERE x.headline_id = h.id AND x.restored_at IS NULL)"""
+        if eligible_only else ""
+    )
+    with _conn(db_path) as con:
+        return pd.read_sql_query(
+            f"""SELECT h.id, h.source, h.title, h.published_at, h.published_timestamp,
+                       h.signal_date, h.timing_bucket, h.category, h.relevance,
+                       h.sentiment_score, h.sentiment_label, h.experiment_id,
+                       h.signal_family, h.signal_family_version,
+                       h.signal_family_rule, h.signal_family_ambiguous,
+                       h.signal_family_review, h.is_market_recap,
+                       h.market_recap_rule, h.market_recap_confidence,
+                       e.event_id
+                FROM headlines AS h
+                LEFT JOIN events AS e ON e.headline_id = h.id
+                WHERE h.processing_status = 'scored'
+                  AND h.sentiment_score IS NOT NULL
+                  AND h.signal_date IS NOT NULL
+                  {exclusion_clause}
+                ORDER BY h.signal_date, h.id""",
+            con,
+        )
+
+
+def upsert_family_signals(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> int:
+    columns = [
+        "signal_date", "signal_family", "experiment_id", "family_version",
+        "simple_mean", "relevance_weighted", "median_sentiment", "min_sentiment",
+        "max_sentiment", "sentiment_std", "headline_count", "source_count",
+        "positive_share", "neutral_share", "negative_share", "avg_relevance",
+        "market_recap_count", "unknown_timing_count", "excluded_count",
+        "unresolved_count", "ambiguous_count", "sample_sufficiency", "updated_at",
+    ]
+    now = _now_iso()
+    payload = [
+        tuple(row.get(column, now if column == "updated_at" else None)
+              for column in columns)
+        for row in rows
+    ]
+    if not payload:
+        return 0
+    with _conn(db_path) as con:
+        con.executemany(
+            f"""INSERT OR REPLACE INTO daily_family_signals ({','.join(columns)})
+                VALUES ({','.join('?' * len(columns))})""",
+            payload,
+        )
+    return len(payload)
+
+
+def _upsert_indicator(table: str, columns: List[str], rows, db_path: str) -> int:
+    now = _now_iso()
+    payload = [
+        tuple(row.get(column, now if column == "updated_at" else None)
+              for column in columns)
+        for row in rows
+    ]
+    if not payload:
+        return 0
+    with _conn(db_path) as con:
+        con.executemany(
+            f"""INSERT OR REPLACE INTO {table} ({','.join(columns)})
+                VALUES ({','.join('?' * len(columns))})""",
+            payload,
+        )
+    return len(payload)
+
+
+def upsert_abnormal_tone(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("abnormal_tone_daily", [
+        "signal_date", "scope", "scope_key", "experiment_id", "window_sessions",
+        "min_history", "observed_mean", "prior_mean", "prior_std", "prior_count",
+        "abnormal_tone", "rolling_z", "rolling_percentile", "method_version",
+        "updated_at",
+    ], rows, db_path)
+
+
+def upsert_disagreement(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("news_disagreement_daily", [
+        "signal_date", "signal_family", "experiment_id", "headline_count",
+        "source_count", "within_day_std", "cross_outlet_std", "max_minus_min",
+        "strong_positive_share", "strong_negative_share", "sentiment_entropy",
+        "camp_gap", "camp_gap_sources", "official_vs_media_gap",
+        "min_sources_met", "method_version", "updated_at",
+    ], rows, db_path)
+
+
+def upsert_volume(rows, db_path: str = DB_PATH) -> int:
+    return _upsert_indicator("news_volume_daily", [
+        "signal_date", "signal_family", "experiment_id", "headline_count",
+        "observation_count", "source_breadth", "window_sessions", "min_history",
+        "prior_mean", "prior_std", "prior_count", "volume_z", "volume_percentile",
+        "change_1", "change_5", "change_20", "method_version", "updated_at",
+    ], rows, db_path)
+
+
+def read_table(table: str, db_path: str = DB_PATH, order_by: str = "") -> pd.DataFrame:
+    """Read one analytical table; used by the dashboard and regime report."""
+
+    clause = f" ORDER BY {order_by}" if order_by else ""
+    with _conn(db_path) as con:
+        return pd.read_sql_query(f"SELECT * FROM {table}{clause}", con)
 
 
 def relabel_from_probs(
