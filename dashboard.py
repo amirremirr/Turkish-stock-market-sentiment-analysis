@@ -19,6 +19,7 @@ from datetime import datetime
 import pandas as pd
 
 import database as db
+from dashboard_regime import REGIME_CSS
 from config import DB_PATH, MINIMUM_HEADLINES_PER_DAY, MINIMUM_OVERLAP_DAYS
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,47 @@ def _collect(db_path: str = DB_PATH) -> dict:
     }
 
 
+def _regime_html(db_path: str) -> str:
+    """Build the News Regime fragment from the stored analytical tables.
+
+    Rendering must never take the dashboard down: if the indicator tables are
+    missing or a read fails, the section degrades to a visible notice while the
+    rest of the page still renders.
+    """
+    try:
+        from dashboard_regime import render_regime_section
+        from indicators.regime import build_regime_report
+
+        family_signals = db.read_table("daily_family_signals", db_path)
+        if family_signals.empty:
+            return render_regime_section({}, pd.DataFrame())
+
+        drivers = db.get_classified_headlines(db_path=db_path)
+        regime = build_regime_report(
+            family_signals,
+            db.read_table("abnormal_tone_daily", db_path),
+            db.read_table("news_disagreement_daily", db_path),
+            db.read_table("news_volume_daily", db_path),
+            drivers,
+        )
+        version = ""
+        if not family_signals.empty:
+            version = str(family_signals["family_version"].iloc[-1])
+        experiment = ""
+        if not drivers.empty and drivers["experiment_id"].notna().any():
+            experiment = str(drivers["experiment_id"].dropna().iloc[-1])
+        return render_regime_section(
+            regime, drivers, family_version=version, experiment_id=experiment,
+        )
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("News Regime section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>News Regime</h2>'
+            '<p class="null">This section could not be rendered from the stored '
+            'indicator tables.</p></section>'
+        )
+
+
 # -- Rendering helpers -----------------------------------------------------------
 
 def _mood(score: float) -> tuple[str, str, str]:
@@ -148,6 +190,7 @@ _CAT_LABELS = {
 
 def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     d = _collect(db_path)
+    regime_html = _regime_html(db_path)
 
     # -- Chart data --
     labels   = [r["date"][5:] for r in d["sent"]]              # MM-DD
@@ -222,6 +265,8 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         "__BARCOLS__":     json.dumps(barcols),
         "__CAT_LABELS__":  json.dumps(cat_labels, ensure_ascii=False),
         "__CAT_COUNTS__":  json.dumps(cat_counts),
+        "__REGIME__":      regime_html,
+        "__REGIME_CSS__":  REGIME_CSS,
     }.items():
         html = html.replace(key, val)
 
@@ -278,6 +323,7 @@ _TEMPLATE = """<!DOCTYPE html>
   .note { background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px;
           padding:12px 16px; font-size:.84rem; margin-bottom:20px; }
   footer { color:#9ca3af; font-size:.78rem; text-align:center; margin-top:24px; }
+__REGIME_CSS__
 </style>
 </head>
 <body>
@@ -374,6 +420,7 @@ new Chart(document.getElementById('catChart'), {
   options:{ plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:10 } } } } }
 });
 </script>
+__REGIME__
 </body>
 </html>
 """
