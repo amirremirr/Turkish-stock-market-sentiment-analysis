@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Tuple, Union
 
 from trading_calendar import ISTANBUL, is_trading_day, session_close
 
@@ -221,22 +221,110 @@ def classify_price_bar(
     )
 
 
-def may_replace(existing_status: Optional[str], incoming_status: str) -> bool:
-    """Return whether an incoming bar may overwrite the stored one.
+def resolve_bar_status(
+    existing_status: Optional[str],
+    incoming_status: str,
+    *,
+    explicit_correction: bool = False,
+) -> Tuple[bool, Optional[str]]:
+    """Decide whether an incoming bar is written, and under which status.
 
-    A settled bar is the better observation, so completion moves forward only:
-    a provisional refetch must never demote a bar that was already verified.
-    Re-observing at the same rank is allowed, since a later fetch of an equally
-    trustworthy bar is simply fresher data.
+    Two properties matter here. Completion never runs backwards: a provisional
+    refetch must not demote a bar that was already settled, because the settled
+    observation is the better one. And ``corrected`` is provenance, not a
+    quality tier: once a bar has been repaired, an ordinary refresh returning
+    the same settled values must not erase the record that it needed repairing.
+    So ``corrected`` is sticky -- a later settled refetch keeps the status and
+    only refreshes the observation timestamp and values.
+
+    ``explicit_correction`` marks the deliberate repair path. It is the only way
+    a bar that was already ``complete`` can become ``corrected``; a routine
+    fetch can never promote itself.
+
+    Returns ``(write, status)``. ``write`` is False when the incoming bar is the
+    weaker observation, in which case ``status`` is None.
     """
 
-    rank = {
-        None: 0,
-        STATUS_PROVIDER_INVALID: 1,
-        STATUS_PROVISIONAL: 2,
-        STATUS_COMPLETE: 3,
-        STATUS_CORRECTED: 3,
-    }
-    if existing_status not in rank:
+    if existing_status not in (
+        None, STATUS_PROVISIONAL, STATUS_COMPLETE,
+        STATUS_CORRECTED, STATUS_PROVIDER_INVALID,
+    ):
         existing_status = None
-    return rank[incoming_status] >= rank[existing_status]
+
+    settled = (STATUS_COMPLETE, STATUS_CORRECTED)
+
+    if incoming_status == STATUS_PROVISIONAL:
+        # Never demote a settled bar back to unfinished.
+        if existing_status in settled:
+            return (False, None)
+        return (True, STATUS_PROVISIONAL)
+
+    if incoming_status == STATUS_PROVIDER_INVALID:
+        # A settled bar outranks a calendar disagreement; keep what we verified.
+        if existing_status in settled:
+            return (False, None)
+        return (True, STATUS_PROVIDER_INVALID)
+
+    if incoming_status == STATUS_CORRECTED:
+        return (True, STATUS_CORRECTED)
+
+    # incoming is complete
+    if existing_status == STATUS_CORRECTED:
+        return (True, STATUS_CORRECTED)          # sticky provenance
+    if existing_status == STATUS_COMPLETE:
+        return (True, STATUS_CORRECTED if explicit_correction else STATUS_COMPLETE)
+    # None, provisional, or provider_invalid: a repair path records the fix.
+    if explicit_correction and existing_status in (
+        STATUS_PROVISIONAL, STATUS_PROVIDER_INVALID
+    ):
+        return (True, STATUS_CORRECTED)
+    return (True, STATUS_COMPLETE)
+
+
+def may_replace(existing_status: Optional[str], incoming_status: str) -> bool:
+    """Whether an incoming bar may overwrite the stored one (see resolve_bar_status)."""
+
+    return resolve_bar_status(existing_status, incoming_status)[0]
+
+
+@dataclass(frozen=True)
+class RefreshWindow:
+    """Whether an after-close price refresh should run right now."""
+
+    allowed: bool
+    reason: str
+    session_date: Optional[str]
+    settles_at: Optional[datetime]
+
+
+def after_close_refresh_allowed(
+    now: Optional[TimestampLike] = None,
+    *,
+    settlement_minutes: Optional[int] = None,
+) -> RefreshWindow:
+    """Decide in Istanbul local time whether today's session has settled.
+
+    A cron expression cannot make this decision. GitHub fires schedules late and
+    unpredictably, and a UTC cron drifts an hour against Istanbul across
+    daylight-saving changes, so a fixed time can land either side of the close.
+    Evaluating the real session close at runtime -- including the official
+    half-day early closes -- is what keeps an after-close job from running
+    mid-session and recording an intraday snapshot as a settled bar.
+    """
+
+    moment = _as_istanbul(now) if now is not None else datetime.now(ISTANBUL)
+    if moment is None:
+        return RefreshWindow(False, "unreadable_current_time", None, None)
+
+    today = moment.date()
+    if not is_trading_day(today):
+        return RefreshWindow(
+            False, "not_a_trading_day", today.isoformat(), None
+        )
+
+    settles_at = settlement_time(today, settlement_minutes=settlement_minutes)
+    if moment < settles_at:
+        return RefreshWindow(
+            False, "before_settlement", today.isoformat(), settles_at
+        )
+    return RefreshWindow(True, "after_settlement", today.isoformat(), settles_at)

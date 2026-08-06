@@ -1667,12 +1667,7 @@ def upsert_prices(
     Returns counts by outcome so a caller can report what actually changed.
     """
     from config import PRICE_BAR_RULE_VERSION
-    from price_bars import (
-        STATUS_COMPLETE,
-        STATUS_CORRECTED,
-        classify_price_bar,
-        may_replace,
-    )
+    from price_bars import classify_price_bar, resolve_bar_status
 
     observed = observed_at or _now_iso()
     counts = {"written": 0, "skipped_would_demote": 0, "provisional": 0,
@@ -1688,14 +1683,12 @@ def upsert_prices(
             classification = classify_price_bar(
                 row.date, volume=row.volume, observed_at=observed
             )
-            status = classification.status
-            if (
-                mark_corrected
-                and status == STATUS_COMPLETE
-                and existing.get(row.date) not in (None, STATUS_COMPLETE, STATUS_CORRECTED)
-            ):
-                status = STATUS_CORRECTED
-            if not may_replace(existing.get(row.date), status):
+            write, status = resolve_bar_status(
+                existing.get(row.date),
+                classification.status,
+                explicit_correction=mark_corrected,
+            )
+            if not write:
                 counts["skipped_would_demote"] += 1
                 continue
             counts[status] = counts.get(status, 0) + 1
@@ -1719,7 +1712,77 @@ def upsert_prices(
         "Upserted %d price rows (%d skipped to avoid demoting a settled bar)",
         counts["written"], counts["skipped_would_demote"],
     )
+    # A fetch window's first row has no predecessor inside that window, so the
+    # provider-derived return is NULL there and would overwrite a valid stored
+    # value. Rebuild the series from the complete stored history instead.
+    counts["returns_recomputed"] = recompute_daily_returns(db_path=db_path)
     return counts
+
+
+def recompute_daily_returns(db_path: str = DB_PATH) -> int:
+    """Rebuild ``daily_return`` from the full ordered series of settled bars.
+
+    Returns are chained across the stored history rather than within whatever
+    window a fetch happened to download, so a boundary row keeps the return to
+    its true preceding session. Only complete and corrected bars form the
+    series: a provisional bar is an intraday snapshot, and chaining a return
+    through one would corrupt both its neighbours. Provisional and invalid rows
+    therefore hold NULL until they settle.
+
+    The earliest stored session keeps NULL because its predecessor is genuinely
+    unavailable, not because of a window edge.
+
+    Returns the number of rows whose stored return changed.
+    """
+    from price_bars import ANALYSABLE_STATUSES
+
+    placeholders = ",".join("?" * len(ANALYSABLE_STATUSES))
+    with _conn(db_path) as con:
+        rows = con.execute(
+            f"""SELECT date, close, daily_return FROM bist100_prices
+                WHERE bar_status IN ({placeholders})
+                ORDER BY date""",
+            ANALYSABLE_STATUSES,
+        ).fetchall()
+
+        updates: List[Tuple[Any, str]] = []
+        previous_close: Optional[float] = None
+        for row in rows:
+            close = row["close"]
+            if previous_close in (None, 0) or close is None:
+                expected = None
+            else:
+                expected = (float(close) / float(previous_close) - 1.0) * 100.0
+            stored = row["daily_return"]
+            differs = (
+                (stored is None) != (expected is None)
+                or (
+                    stored is not None
+                    and expected is not None
+                    and abs(float(stored) - expected) > 1e-9
+                )
+            )
+            if differs:
+                updates.append((expected, row["date"]))
+            if close is not None:
+                previous_close = float(close)
+
+        # A bar outside the settled series has no defensible return to report.
+        excluded = con.execute(
+            f"""SELECT date FROM bist100_prices
+                WHERE (bar_status IS NULL OR bar_status NOT IN ({placeholders}))
+                  AND daily_return IS NOT NULL""",
+            ANALYSABLE_STATUSES,
+        ).fetchall()
+        updates.extend((None, row["date"]) for row in excluded)
+
+        if updates:
+            con.executemany(
+                "UPDATE bist100_prices SET daily_return=? WHERE date=?", updates
+            )
+    if updates:
+        logger.info("Recomputed %d daily return(s) on the stored series", len(updates))
+    return len(updates)
 
 
 def backfill_price_bar_status(db_path: str = DB_PATH) -> Dict[str, int]:
@@ -1770,6 +1833,10 @@ def backfill_price_bar_status(db_path: str = DB_PATH) -> Dict[str, int]:
                 updates,
             )
     logger.info("Classified %d price bars", counts["classified"])
+    if updates:
+        # Classification decides which bars form the settled series, so the
+        # return chain has to be rebuilt against the new membership.
+        counts["returns_recomputed"] = recompute_daily_returns(db_path=db_path)
     return counts
 
 
