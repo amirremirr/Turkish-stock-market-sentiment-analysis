@@ -148,3 +148,20 @@ jobs:
           git add -f finance_sentiment.db sentiment_vs_bist100.png
           git commit -m "data snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -f origin data-snapshot:data
+
+      # Deliberately the last step, and deliberately allowed to fail the run.
+      #
+      # It re-hashes the frozen study, checks its conclusion is still verbatim,
+      # and compares the stored artifact against the copy committed to main. A
+      # mismatch means a sealed result changed, which is the one thing this
+      # project must never do quietly -- so it is loud.
+      #
+      # It runs *after* publishing on purpose. Blocking the persist step would
+      # trade a day of headlines, which roll off the feeds and cannot be
+      # recollected, for a check that is equally informative a minute later.
+      #
+      # The orphan checkout above empties the index but leaves every file on
+      # disk, so the scripts and the committed artifacts are still readable
+      # here without restoring anything.
+      - name: Verify frozen artifacts are unchanged
+        run: python -m scripts.freeze_result --db finance_sentiment.db --verify-only

@@ -5,7 +5,7 @@
 ![Tests](https://img.shields.io/badge/tests-596%20passing-brightgreen.svg)
 ![Sentiment](https://img.shields.io/badge/sentiment-gpt--5--mini-orange.svg)
 ![Result](https://img.shields.io/badge/predictive%20result-null%20(frozen)-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-active%20research-yellow.svg)
+![Status](https://img.shields.io/badge/status-maintenance%20%26%20data%20accumulation-blue.svg)
 
 ---
 
@@ -142,6 +142,7 @@ For the active LLM backend, the model returns sentiment direction and model-repo
 | One-command verification | `python -m scripts.verify_all --db finance_sentiment.db` checks schema, frozen artifacts, integrity, timing, tests and demo outputs |
 | Frozen retrospective result | `walk-forward-protocol-v1`, artifact `bfdbadb0...`, immutable and append-only; conclusion stored verbatim |
 | Untouched future validation | `untouched_future_v1` accumulating from reaction session 2026-08-10; outcome sealed until 51 sessions and 120 days |
+| Operating mode | **Maintenance and untouched-data accumulation** since 2026-08-08. No new predictive features, models, targets, thresholds, control sets, grouping rules or validation criteria without a new versioned research project. See [docs/OPERATIONS.md](docs/OPERATIONS.md) |
 | Current automation | GitHub Actions on weekdays at 06:30 UTC (09:30 Istanbul); the SQLite snapshot is persisted on the `data` branch |
 | Sample snapshots | Local checked-in DB: 2026-03-12 through 2026-07-07; latest known `origin/data` snapshot: 2026-07-31. Counts are intentionally omitted because the automated snapshot continues to change |
 | Last methodology update | 2026-08-01 (processing integrity, session variants/alignment, polarization inference, and public demo); scorer prompt `p3` last changed 2026-06-13 |

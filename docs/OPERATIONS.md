@@ -3,6 +3,91 @@
 How the production pipeline runs, what each scheduled job may touch, and how to
 undo any of it.
 
+## Operating mode: maintenance and untouched-data accumulation
+
+**Since 2026-08-08 the research platform is feature-complete.** The project is
+collecting data toward a sealed future test, not building new research.
+
+**Not permitted without an explicit new versioned research project:** predictive
+features, models, targets, thresholds, control sets, event-grouping rules, or
+validation criteria.
+
+**Standing responsibilities:**
+
+| # | Responsibility | How it is enforced |
+|---|---|---|
+| 1 | Both workflows healthy | run history; failures are investigated, not retried blindly |
+| 2 | Frozen artifact unchanged | `Verify frozen artifacts are unchanged` runs on every `daily-pipeline` run and **fails the run** on a mismatch; the table is append-only by trigger |
+| 3 | `untouched_future_v1` unchanged | append-only by trigger; the definition hash covers the boundary |
+| 4 | `corpus_epoch` assigned correctly | stamped at dataset build time; `tests/test_frozen_future_validation.py::TestUntouchedBoundary` |
+| 5 | Readiness without performance | `database.record_future_readiness` **raises** on any accuracy, error or correlation |
+| 6 | Integrity checks and backups | `scripts/verify_all.py`; `scripts/guard_db_snapshot.py` before every publish; rolling local backups |
+| 7 | Fix operational bugs only | a bug fix must be justifiable without reference to any future outcome |
+| 8 | Documentation synchronised | this file changes in the same commit as the behaviour it describes |
+
+**Rule 7 in practice.** If a change to method would look different depending on
+what the untouched data has done, it is not an operational fix. The test is
+whether the justification survives being written down *before* looking. Anything
+that fails that test waits for a new versioned project.
+
+### What may be reported before readiness
+
+Accumulated sessions · required sessions · elapsed days · data-quality failures
+· missingness · family coverage · control availability · workflow health.
+
+**Never**, from the untouched corpus: accuracy, MAE, RMSE, correlation, hit
+rate, model coefficients, rankings, or any other outcome-based predictive
+statistic. Watching those accumulate and running the evaluation when they look
+favourable is optional-stopping; it inflates the false-positive rate and leaves
+no trace in the resulting interval.
+
+```bash
+python -m scripts.future_readiness --db finance_sentiment.db
+```
+
+### When readiness is reached
+
+`untouched_future_v1` becomes eligible only when **all** hold:
+
+- ≥ 51 untouched eligible sessions
+- ≥ 51 distinct outcomes
+- ≥ 120 calendar days since 2026-08-08
+- every other sealed eligibility requirement in
+  [`docs/frozen/untouched_future_v1.json`](frozen/untouched_future_v1.json)
+
+At that point: **stop and report that the frozen validation is eligible to
+execute.** Do not run it, and do not change or optimise the protocol. A protocol
+adjusted at the moment of eligibility is not the protocol that was frozen.
+
+### Pending operational checkpoint
+
+The 2026-08-07 BIST bar is `provisional` (volume 0.0,
+`observed_before_settlement`). The morning run fires before the open, so the bar
+it stores for the current session is provisional by construction.
+
+The `after-close-prices` job dispatched on 2026-08-07 22:57 UTC ran to
+completion and correctly reported `not_a_trading_day` — it was already Saturday
+in Istanbul. That confirms the settlement guard works after the import fix, but
+the promotion itself has **not** been observed.
+
+**Next opportunity:** the scheduled `after-close-prices` run on the next
+trading day at 16:10 UTC.
+
+**What to verify when it runs:**
+
+1. the 2026-08-07 bar becomes `complete` or `corrected`;
+2. it becomes visible to complete-only reads (`get_prices(complete_only=True)`,
+   `PriceSeries`), so return windows can use it;
+3. **no** change to headline scores, labels, detailed categories, experiment
+   identities, or the frozen research artifacts.
+
+```bash
+python -m scripts.verify_all --db finance_sentiment.db
+```
+
+Record the outcome in this section when it happens. This is an operational
+checkpoint, not a research checkpoint — no new one follows it.
+
 ## Two scheduled workflows
 
 | | `daily-pipeline` | `after-close-prices` |

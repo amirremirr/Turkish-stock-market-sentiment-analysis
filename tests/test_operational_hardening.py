@@ -568,6 +568,34 @@ def test_readiness_step_runs_after_collection():
     assert pipeline_index < readiness
 
 
+def test_frozen_artifacts_are_verified_on_every_run():
+    """A sealed result changing is the one thing that must never be quiet."""
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    step = next(
+        s for s in steps if "frozen artifacts" in str(s.get("name", "")).lower()
+    )
+    assert "--verify-only" in step["run"]
+    assert "if" not in step, "artifact verification is unconditional"
+    assert step.get("continue-on-error") is not True, (
+        "a changed artifact must fail the run loudly"
+    )
+
+
+def test_artifact_verification_runs_after_publishing():
+    """Headlines roll off the feeds; a check is equally informative a minute later.
+
+    Blocking the persist step on this would trade unrecoverable data for a
+    verification that loses nothing by running immediately afterwards.
+    """
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    names = [str(s.get("name", "")) for s in steps]
+    persist = next(i for i, n in enumerate(names) if n.startswith("Persist DB"))
+    verify = next(i for i, n in enumerate(names) if "frozen artifacts" in n.lower())
+    assert persist < verify
+
+
 def test_validation_step_cannot_score_or_scrape():
     """It reads stored tables; it must not be handed a scoring credential."""
 

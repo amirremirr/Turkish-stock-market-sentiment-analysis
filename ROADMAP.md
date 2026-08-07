@@ -221,6 +221,25 @@ commands: `scripts.demo_phase_a` and `scripts.verify_all`.
 
 See [docs/RESEARCH_REPORT.md](docs/RESEARCH_REPORT.md).
 
+## Maintenance and untouched-data accumulation - current mode
+
+Entered 2026-08-08. The research platform is feature-complete. The project now
+collects data toward a sealed future test rather than building new research.
+
+No predictive feature, model, target, threshold, control set, event-grouping
+rule or validation criterion is added without an explicit new versioned research
+project. Operational bugs are fixed; a fix whose justification would look
+different depending on what the untouched data has done is not an operational
+fix.
+
+`untouched_future_v1` is not run until it accumulates 51 eligible sessions, 51
+distinct outcomes and 120 calendar days. When that happens the correct action is
+to **report eligibility and stop** -- not to run it, and not to adjust the
+protocol at the moment it becomes testable.
+
+Standing responsibilities, the pre-readiness reporting surface, and the pending
+2026-08-07 bar checkpoint are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 ## Approved decisions - implemented in Phase A
 
 These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**
