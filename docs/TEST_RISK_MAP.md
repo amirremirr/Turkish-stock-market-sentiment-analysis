@@ -155,12 +155,34 @@ error, so none of them can be caught by ordinary operation.
 | A small sample declares success | **Covered** | `::test_reduced_geometry_cannot_declare_success`. | None for the tested path. |
 | Uncertainty ignores repeated sessions | **Covered** | `::test_cluster_bootstrap_resamples_clusters_not_rows` and `::test_bootstrap_is_deterministic`. | A cluster bootstrap handles cross-sectional dependence, not serial dependence. |
 
+## Frozen-result and future-validation risks (2026-08-08)
+
+`tests/test_frozen_future_validation.py` (30 tests). Each risk below is a way a
+study could quietly become a different, more favourable study.
+
+| Risk | Status | Evidence | Residual gap |
+|---|---|---|---|
+| A frozen result is edited after the fact | **Covered** | `::test_stored_artifact_cannot_be_edited_or_removed` requires the append-only triggers to refuse both UPDATE and DELETE; `::test_hash_covers_the_content` detects tampering. | The database is protected; a rewritten git history would need the committed JSON check in `verify_all`. |
+| The conclusion is reworded to match new numbers | **Covered** | `::test_conclusion_is_not_regenerated_from_the_numbers` feeds a winning comparison and requires the verbatim null. | None for the tested path. |
+| Re-checking a study mints a new hash | **Covered** | `::test_hash_ignores_the_freeze_timestamp`. | None for the tested path. |
+| A blocked specification disappears from the record | **Covered** | `::test_every_prediction_and_specification_is_retained` requires the binding requirement and per-column missingness to survive. | None for the tested path. |
+| The untouched boundary moves backwards | **Covered** | `::test_definition_hash_changes_with_the_boundary` and `::test_registration_is_idempotent_and_immutable`. | The hash detects a move; it cannot prevent a second definition being registered, which is why the first is what readiness reads. |
+| An undated row drifts into the sealed sample | **Covered** | `::test_missing_session_is_never_counted_as_untouched`. | None for the tested path. |
+| Performance is watched while the sample accumulates | **Covered** | `::test_readiness_rejects_outcome_statistics` proves the writer refuses an accuracy; `::test_report_carries_no_performance_field` proves the reader never produces one. | Someone querying the dataset directly is outside this boundary; the seal is on the reported surface. |
+| A not-yet-open window reads as satisfying the horizon | **Covered** | `::test_a_not_yet_open_window_can_never_satisfy_the_horizon`. | None for the tested path. |
+| Control coverage is bought by weakening the estimator | **Covered** | `::test_minimum_observation_rule_is_not_weakened` pins 30; `::test_estimation_series_is_strictly_prior` requires the estimation window to end before the described date. | Coverage now depends on price history length, which is stated rather than tuned. |
+| A provisional bar enters a beta | **Covered** | `::test_market_return_series_covers_sessions_without_events`. | None for the tested path. |
+| Review is nudged by the outcome | **Covered** | `::test_draw_never_reads_market_data` records every SQL statement the draw executes and forbids return, residual, price and dataset tables. | A reviewer could still look the outcome up themselves; the tooling does not show it. |
+| The review sample is not reproducible | **Covered** | `::test_draw_is_deterministic` and hash-ordered selection. | Determinism holds for a fixed corpus; a grown corpus draws a different sample, which is why the sample version is stored. |
+| Future validation breaks data collection | **Covered** | `tests/test_operational_hardening.py::test_readiness_runs_daily_but_cannot_break_collection` requires `continue-on-error`. | None for the tested path. |
+
 ## Risks intentionally remaining
 
 | Risk | Current evidence | Required next work |
 |---|---|---|
 | Live-provider integration | Mocked unit tests cover contracts, not continuing provider compatibility. | Small monitored integration checks that do not make the deterministic suite network-dependent. |
-| Out-of-sample predictive validity | Established as **null** under a frozen protocol on 49 sessions, with most specifications refused by the sample-size gate. | More sessions. The binding constraint is data, not method: the protocol is fixed and rerunning it on a longer corpus requires no new decisions. |
+| Out-of-sample predictive validity | Established as **null** under a frozen protocol on 50 independent sessions, with most specifications refused by the sample-size gate. The result is sealed as an immutable artifact. | The untouched `untouched_future_v1` test, accumulating from reaction session 2026-08-10; its outcome stays sealed until 51 sessions and 120 days. |
+| Candidate-group accuracy | A stratified 120-group review sample is drawn deterministically and blind to returns, but no group has been reviewed. | A completed review sheet. Thresholds are not tuned from it; any revision takes a new algorithm version. |
 | Serial dependence between adjacent sessions | The one-session embargo bounds story overlap; the cluster bootstrap does not model autocorrelation. | A block bootstrap or HAC standard errors once the sample supports estimating the dependence. |
 
 ## Maintenance rule

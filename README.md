@@ -2,9 +2,116 @@
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-201%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-596%20passing-brightgreen.svg)
 ![Sentiment](https://img.shields.io/badge/sentiment-gpt--5--mini-orange.svg)
+![Result](https://img.shields.io/badge/predictive%20result-null%20(frozen)-lightgrey.svg)
 ![Status](https://img.shields.io/badge/status-active%20research-yellow.svg)
+
+---
+
+## In 60 seconds
+
+**Problem.** Does Turkish-language financial news carry information about the
+next tradable move in the BIST 100 — beyond what lagged global market factors
+already explain?
+
+**Architecture.** A daily cloud pipeline scrapes 11 Turkish outlets, scores each
+headline with an LLM against a project-specific bullish/bearish rubric, aligns
+it to the first Borsa Istanbul session that could *react* to it, groups
+headlines into candidate events, builds timing-safe market windows, and
+evaluates a frozen walk-forward protocol. State lives in a SQLite snapshot on an
+orphan `data` branch; the cloud is the single writer.
+
+**Dashboard.** One self-contained HTML file, seven sections: Data Health · News
+Regime · Signal Families · Candidate Events · Market Windows · Predictive
+Validation · Future Validation Status. Build it with `python main.py dashboard`.
+
+**Major result.**
+
+> **No evaluated news specification demonstrated reliable incremental
+> out-of-sample predictive value under the pre-specified criteria in the current
+> sample.**
+
+50 independent sessions · 22 specifications fitted, 50 refused by a sample-size
+gate · **0** met the pre-specified criteria. The result is frozen and immutable
+([artifact](docs/frozen/walk-forward-protocol-v1.json)). A genuinely untouched
+future test (`untouched_future_v1`) is now accumulating, with its outcome
+sealed until a minimum sample is reached.
+
+**No validated alpha, no trading strategy, and nothing here is investment
+advice.**
+
+---
+
+## In 5 minutes
+
+**Methodology.** LLM scoring at 83.3% held-out categorical agreement against a
+300-headline human rubric — the question asked is whether an item is bullish or
+bearish *for Turkish equities*, which is often the opposite of whether it is
+good news. Two versioned taxonomies (signal families, market recap) sit beside
+the frozen LLM category rather than replacing it.
+→ [METHODOLOGY.md](METHODOLOGY.md), [LABELING.md](LABELING.md)
+
+**Safeguards.** These exist because each caught something real:
+
+| Safeguard | What it caught |
+|---|---|
+| Mixed-experiment aggregation refused at runtime | three days of production runs averaging two scorer identities |
+| Price-bar completeness states | a mid-session snapshot stored as a close, 1.53% off with the direction inverted |
+| Timing audit proving `signal_date` from records | every post-close window built one session late |
+| Session-level statistical unit | 773 event rows carrying only 50 independent outcomes |
+| Sample-size gate that refuses to fit | 50 specifications that would otherwise have been quoted |
+| Append-only audit tables | manual review and provenance history that a rerun would have erased |
+
+**Event layer.** Transparent rule-based grouping — shared entity, same family,
+48h anchored window, title-similarity threshold — not learned similarity. Every
+mapping keeps its similarity score and match rule. 94% of groups are singletons,
+and nothing calls them verified events because no human has reviewed one yet.
+→ [docs/EVENT_MODEL.md](docs/EVENT_MODEL.md)
+
+**Predictive evaluation.** A protocol hashed before results were read: target,
+sample, feature sets, models, folds, embargo, metrics, missing-value policy,
+thresholds and success criteria all fixed in advance. Chronological folds, no
+random splitting, preprocessing fitted on training folds only, baselines
+re-scored on exactly the sessions each news model predicted.
+→ [docs/PREDICTIVE_PROTOCOL.md](docs/PREDICTIVE_PROTOCOL.md)
+
+**The full write-up:** [docs/RESEARCH_REPORT.md](docs/RESEARCH_REPORT.md) — 15
+sections, separating descriptive findings from retrospective exploratory results
+from the frozen future validation.
+
+---
+
+## Deep technical
+
+| Area | Document |
+|---|---|
+| Complete research report | [docs/RESEARCH_REPORT.md](docs/RESEARCH_REPORT.md) |
+| Methodology and design decisions | [METHODOLOGY.md](METHODOLOGY.md) |
+| Component and schema reference | [DOCUMENTATION.md](DOCUMENTATION.md) |
+| Timing semantics, proven from records | [docs/TIMING.md](docs/TIMING.md) |
+| Frozen predictive protocol | [docs/PREDICTIVE_PROTOCOL.md](docs/PREDICTIVE_PROTOCOL.md) |
+| Frozen result artifact (JSON) | [docs/frozen/](docs/frozen/) |
+| Event model and market targets | [docs/EVENT_MODEL.md](docs/EVENT_MODEL.md) |
+| Descriptive indicators | [docs/FINANCIAL_INDICATORS.md](docs/FINANCIAL_INDICATORS.md) |
+| Test coverage by risk, with residual gaps | [docs/TEST_RISK_MAP.md](docs/TEST_RISK_MAP.md) |
+| Reproducibility and credentials | [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) |
+| Operations and schedules | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| Data sources | [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) |
+| Labelling rubric | [LABELING.md](LABELING.md) |
+| Migration history | [MIGRATION.md](MIGRATION.md) |
+| Roadmap | [ROADMAP.md](ROADMAP.md) |
+
+Two commands, neither needing a credential:
+
+```bash
+python -m scripts.demo_phase_a                        # offline demo
+python -m scripts.verify_all --db finance_sentiment.db  # schema, artifacts,
+                                                        # integrity, timing,
+                                                        # tests, demo
+```
+
+---
 
 This is an AI-assisted research pipeline for Turkish financial news. Its strongest contribution is the auditable collection, scoring, market-session alignment, and evaluation process - not a validated trading signal.
 
@@ -25,13 +132,16 @@ For the active LLM backend, the model returns sentiment direction and model-repo
 | Item | Current state |
 |---|---|
 | Production scorer | OpenAI `gpt-5-mini`, prompt version `p3`; XLM-RoBERTa remains an offline fallback |
-| Deterministic tests | **201 passing** across ingestion, scoring, migration, aggregation, inference, and demo behavior |
+| Deterministic tests | **596 passing** across ingestion, scoring, migration, aggregation, timing, event grouping, walk-forward validation, freezing, and demo behavior |
 | Processing integrity | Explicit `pending`, `scored`, `retry_pending`, and `failed` states; omitted items are retried and never fabricated as neutral |
 | Raw-data handling | Source-distinct fetched observations are audited before canonical deduplication; filtering uses reversible, versioned exclusions; permanent deletion is a guarded code-level operation |
 | Predictive baseline | Session-aligned `daily_signal_variants.simple_mean`; relevance-, intensity/relevance-, and full-weighted variants are retained for sensitivity analysis |
 | Run health | Final `success` / `degraded` / `failed` outcome plus scrape, scoring, aggregation, market-data, and audit component states and structured diagnostics |
 | Polarization inference | Raw means/effect size, date-cluster bootstrap, topic/date controls, clustered sensitivities, and separate selection/framing outputs; observational only |
-| Public demo | `python -m scripts.demo`; committed cached scores and prices, no API key, model download, private DB, or network |
+| Public demo | `python -m scripts.demo_phase_a`; committed fixture, no API key, model download, private DB, or network |
+| One-command verification | `python -m scripts.verify_all --db finance_sentiment.db` checks schema, frozen artifacts, integrity, timing, tests and demo outputs |
+| Frozen retrospective result | `walk-forward-protocol-v1`, artifact `bfdbadb0...`, immutable and append-only; conclusion stored verbatim |
+| Untouched future validation | `untouched_future_v1` accumulating from reaction session 2026-08-10; outcome sealed until 51 sessions and 120 days |
 | Current automation | GitHub Actions on weekdays at 06:30 UTC (09:30 Istanbul); the SQLite snapshot is persisted on the `data` branch |
 | Sample snapshots | Local checked-in DB: 2026-03-12 through 2026-07-07; latest known `origin/data` snapshot: 2026-07-31. Counts are intentionally omitted because the automated snapshot continues to change |
 | Last methodology update | 2026-08-01 (processing integrity, session variants/alignment, polarization inference, and public demo); scorer prompt `p3` last changed 2026-06-13 |

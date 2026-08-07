@@ -195,3 +195,22 @@ known to be one session late, so a query filtering by group key alone would
 otherwise return the wrong number. Raw observations, scores, labels, detailed
 categories, experiment identities and the append-only audit tables are out of
 scope and unchanged.
+
+## Frozen artifacts and future validation (2026-08-08)
+
+Four new tables: `frozen_research_results` and `future_validation_definitions`
+(both append-only by trigger), `future_validation_readiness`, and
+`event_review_sample`. Additive columns: `corpus_epoch` on
+`event_research_dataset` and `session_modelling_units`; `source`,
+`retrieved_at` and `transform_version` on `market_factors`; `source` and
+`retrieved_at` on `bist100_prices`.
+
+`control-sets-v2` estimates rolling betas on the full settled price history
+rather than only on event sessions, and `event-research-dataset-v3` carries the
+epoch label. Both are versioned rather than in-place changes, so the frozen
+retrospective artifact -- produced under `control-sets-v1` and
+`event-research-dataset-v2` -- remains exactly what it was.
+
+Market history was backfilled to 2025-01-02 for EEM, Brent, USD/TRY and the
+BIST 100. Existing dates are never overwritten without `--overwrite`, so a
+backfill cannot replace the corrected 2026-07-31 bar with a provider value.

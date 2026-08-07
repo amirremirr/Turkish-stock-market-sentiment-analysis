@@ -190,6 +190,37 @@ baselines by the pre-specified margins on any target. The sample is small enough
 that most specifications were refused outright by the sample-size gate. No
 trading strategy exists and no transaction-cost evaluation has been performed.
 
+## Frozen future validation and public research product - completed
+
+Completed 2026-08-08.
+
+**The retrospective study is sealed.** `walk-forward-protocol-v1` and its
+results are an immutable artifact -- append-only in the database, committed as
+JSON, hashed, with the conclusion stored verbatim. A later version performing
+differently does not revise it; it is a different study with its own artifact.
+
+**`untouched_future_v1` is registered.** A test on data that did not exist when
+the rules were written, opening at reaction session 2026-08-10. Feature design,
+feature selection, model choice, hyperparameters, target, thresholds and success
+criteria were all sealed before that date. The outcome side stays sealed until
+51 sessions and 120 days: readiness reporting is structurally incapable of
+emitting an accuracy, because watching performance accumulate and stopping when
+it looks good is optional-stopping and leaves no trace in the interval.
+
+**Coverage improved without weakening anything.** Market-factor and BIST history
+backfilled to 2025-01-02 with per-row provenance, and rolling control betas are
+now estimated on the full settled price history rather than only on sessions
+that carried an event. Residual coverage rose from 12 to 42 sessions. The
+30-observation minimum was not touched.
+
+**Quality audit and public product.** A deterministic 120-group review sample
+across eight strata, drawn blind to market returns. A seven-section dashboard, a
+fifteen-section research report separating descriptive from retrospective from
+frozen-future claims, three-depth README navigation, and two credential-free
+commands: `scripts.demo_phase_a` and `scripts.verify_all`.
+
+See [docs/RESEARCH_REPORT.md](docs/RESEARCH_REPORT.md).
+
 ## Approved decisions - implemented in Phase A
 
 These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**
