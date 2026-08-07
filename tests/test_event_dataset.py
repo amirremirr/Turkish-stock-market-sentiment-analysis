@@ -220,30 +220,49 @@ def test_provisional_bars_are_never_used(price_series):
 
 
 def test_pre_open_uses_same_session_open_to_close(price_series):
-    windows = build_return_windows("2026-07-30", "pre_open", price_series)
-    assert len(windows) == 1
-    window = windows[0]
-    assert window.window_name == "same_session_open_to_close"
+    windows = {
+        w.window_name: w
+        for w in build_return_windows("2026-07-30", "pre_open", price_series)
+    }
+    window = windows["reactable_open_to_close"]
     assert window.entry_price == 103.0 and window.exit_price == 105.0
     assert window.raw_return == pytest.approx((105.0 / 103.0 - 1) * 100)
     assert window.information_cutoff.endswith("10:00:00+03:00")
     assert window.assumed_execution == window.information_cutoff
+    assert window.is_tradable is True
 
 
-def test_post_close_cannot_act_before_the_next_open(price_series):
+def test_post_close_trades_the_session_that_can_react(price_series):
+    """Rewritten for v2: this test previously encoded the one-session shift.
+
+    ``signal_date`` is the first *reactable* session, so a post-close story
+    assigned to 2026-07-30 is traded at that session's open -- not at its close
+    against 2026-07-31, which is what v1 built and what made every post-close
+    target measure the session after the one the news could move.
+    """
+
     windows = {
         w.window_name: w
         for w in build_return_windows("2026-07-30", "post_close", price_series)
     }
     assert set(windows) == {
-        "close_to_next_open", "next_open_to_next_close", "close_to_next_close",
+        "reactable_open_to_close", "prior_close_to_reactable_open",
+        "prior_close_to_reactable_close",
     }
-    nxt = windows["close_to_next_close"]
-    assert nxt.entry_date == "2026-07-30" and nxt.exit_date == "2026-07-31"
-    assert nxt.entry_price == 105.0 and nxt.exit_price == 104.0
-    # Execution is the next open, never the close that has already happened.
-    assert nxt.assumed_execution.startswith("2026-07-31")
-    assert nxt.information_cutoff.startswith("2026-07-30")
+
+    primary = windows["reactable_open_to_close"]
+    assert primary.entry_date == "2026-07-30" and primary.exit_date == "2026-07-30"
+    assert primary.entry_price == 103.0 and primary.exit_price == 105.0
+    assert primary.assumed_execution.startswith("2026-07-30T10:00")
+    assert primary.is_tradable is True
+
+    # The gap from the last pre-publication close is a reaction measure: being
+    # positioned at that close would have required knowing the news first.
+    gap = windows["prior_close_to_reactable_close"]
+    assert gap.entry_date == "2026-07-29" and gap.exit_date == "2026-07-30"
+    assert gap.entry_price == 102.0 and gap.exit_price == 105.0
+    assert gap.information_cutoff.startswith("2026-07-29")
+    assert gap.is_tradable is False
 
 
 def test_during_session_is_blocked_for_want_of_intraday_data(price_series):
@@ -259,9 +278,31 @@ def test_unknown_timing_is_blocked(price_series):
     assert windows[0].unavailable_reason == REASON_UNKNOWN_TIMING
 
 
-def test_window_reports_unavailable_when_no_following_session(price_series):
-    windows = build_return_windows("2026-07-31", "post_close", price_series)
+def test_window_reports_unavailable_without_a_bar_on_the_reactable_session(
+    price_series,
+):
+    """v2 needs the reactable session's own bar, not a following one.
+
+    Under v1 an event on the last available session had no "next" bar and every
+    window went unavailable. Under v2 the last session is itself tradable, so
+    the failure mode that matters is a missing bar on the reactable session --
+    here 2026-08-03, which exists but is provisional and therefore invisible.
+    """
+
+    windows = build_return_windows("2026-08-03", "post_close", price_series)
     assert all(not window.is_available for window in windows)
+    assert windows[0].unavailable_reason == "no_complete_price_bar"
+
+
+def test_last_available_session_is_still_tradable(price_series):
+    """The corrected builder does not need a session after the reaction."""
+
+    windows = {
+        w.window_name: w
+        for w in build_return_windows("2026-07-31", "post_close", price_series)
+    }
+    assert windows["reactable_open_to_close"].is_available is True
+    assert windows["reactable_open_to_close"].entry_date == "2026-07-31"
 
 
 @pytest.mark.parametrize(

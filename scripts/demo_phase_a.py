@@ -26,6 +26,13 @@ from events.clustering import (
     CLUSTER_ALGORITHM_VERSION, group_candidate_events, summarise_event,
 )
 from research.dataset import build_event_dataset, dataset_coverage
+from research.modelling_unit import (
+    attach_lagged_features, build_session_units, unit_counts,
+)
+from research.return_windows import PRIMARY_WINDOW
+from research.timing import (
+    SIGNAL_DATE_SEMANTICS, TIMING_RULE_VERSION, previous_session,
+)
 from taxonomy.market_recap import classify_market_recap
 from taxonomy.signal_family import (
     DOMESTIC_FAMILIES, SIGNAL_FAMILY_VERSION, assign_signal_family,
@@ -168,6 +175,40 @@ def run_demo(
     for window in built["windows"]:
         windows_by_group.setdefault(window["group_key"], []).append(window)
 
+    # -- the statistical unit, and why it is the session ---------------------
+    units = attach_lagged_features(build_session_units(built["dataset"]))
+    counts = unit_counts(built["dataset"], units)
+
+    # -- the timing convention, shown rather than asserted -------------------
+    # One example per bucket, so a reader sees the buckets that *discriminate*
+    # between the two readings of signal_date, not three copies of pre_open.
+    bucket_notes = {
+        "pre_open": "published before the open; traded at that open",
+        "post_close": "published after the close; traded at the next open",
+        "weekend_or_holiday": "published off-calendar; traded at the next open",
+        "during_session": "blocked: no intraday price to enter at",
+        "unknown": "blocked: publication time unknown",
+    }
+    timing_examples = []
+    for bucket, note in bucket_notes.items():
+        example = next(
+            (r for r in records if r["timing_bucket"] == bucket), None,
+        )
+        if example is None:
+            continue
+        session = example["signal_date"]
+        tradable = bucket in ("pre_open", "post_close", "weekend_or_holiday")
+        timing_examples.append({
+            "title": example["title"][:70],
+            "timing_bucket": bucket,
+            "signal_date_is": SIGNAL_DATE_SEMANTICS,
+            "first_reactable_session": session,
+            "previous_trading_session": previous_session(session),
+            "entry": session if tradable else None,
+            "exit": session if tradable else None,
+            "note": note,
+        })
+
     largest = max(event_rows, key=lambda row: row["headline_count"])
     largest_members = next(
         g for g in groups if g.group_key == largest["group_key"]
@@ -232,10 +273,31 @@ def run_demo(
         },
         "example_event_brief": example_brief,
         "market_window_coverage": coverage,
+        "timing_convention": {
+            "signal_date_means": SIGNAL_DATE_SEMANTICS,
+            "rule_version": TIMING_RULE_VERSION,
+            "primary_window": PRIMARY_WINDOW,
+            "examples": timing_examples,
+            "note": (
+                "Every tradable bucket executes at the open of the first "
+                "reactable session. Windows anchored to the prior close measure "
+                "reaction and could not have been traded."
+            ),
+        },
+        "statistical_unit": {
+            **counts,
+            "note": (
+                "Events sharing a reactable session share one index return, so "
+                "the session is the unit. The duplication factor is how many "
+                "event rows sit behind each independent outcome."
+            ),
+        },
         "notes": [
             "Descriptive only. Nothing here is a validated predictive signal.",
             "Candidate event groups are algorithmic, not verified real-world events.",
             "Provisional price bars are excluded from every return window.",
+            "signal_date is the first session able to react, never the "
+            "publication session.",
             "NULL means the value could not be defensibly computed, most often "
             "for want of prior history or independent sources.",
             "Market recap is retained for attention analysis and excluded from "

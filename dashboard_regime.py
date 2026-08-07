@@ -346,6 +346,10 @@ def render_event_section(
             warnings.append("spans sessions")
         if int(row.get("unknown_timestamp_count") or 0):
             warnings.append("unknown time")
+        if int(row.get("timing_conflict") or 0):
+            # Members react on different sessions, so no single window is
+            # unambiguously this group's. Shown, and excluded from evaluation.
+            warnings.append("timing conflict")
         rows.append(f"""
     <tr>
       <td><code>{_esc(str(row.get("group_key"))[-12:])}</code></td>
@@ -401,4 +405,99 @@ EVENT_CSS = """
 .suff-unreviewed { background:#eef2f7; color:#3b4c5e; }
 .suff-confirmed { background:#e6f4ea; color:#1e4620; }
 .suff-rejected { background:#f3e6e6; color:#6b1e1e; }
+.verdict-failure { background:#f3e6e6; color:#6b1e1e; }
+.verdict-inconclusive { background:#fdf3e3; color:#6b4a1e; }
+.verdict-success { background:#e6f4ea; color:#1e4620; }
+"""
+
+
+def render_validation_section(
+    runs, results, *, protocol_hash: str = "", geometry: str = "",
+) -> str:
+    """Render walk-forward results without a single directional suggestion.
+
+    What this section deliberately does not contain: a prediction for tomorrow,
+    a ranking of which model to "use", or any figure a reader could act on. It
+    reports how a frozen protocol performed against its own baselines on data
+    already collected, and says so in those words.
+    """
+
+    if runs is None or getattr(runs, "empty", True):
+        return (
+            '<section class="card" id="validation"><h2>Walk-Forward Validation</h2>'
+            '<p class="null">No validation run has been recorded yet.</p>'
+            '</section>'
+        )
+
+    latest = runs.sort_values("validation_run_id").iloc[-1]
+    verdict = str(latest.get("verdict") or "unknown")
+
+    body = ""
+    if results is not None and not getattr(results, "empty", True):
+        scoped = results[
+            results["validation_run_id"] == latest["validation_run_id"]
+        ] if "validation_run_id" in results else results
+        fitted = scoped[scoped["status"] == "fitted"].sort_values("mae")
+        blocked = scoped[scoped["status"] != "fitted"]
+
+        rows = []
+        for _, row in fitted.head(20).iterrows():
+            interval = (
+                f"[{_num(row.get('hit_lower'), 2)}, {_num(row.get('hit_upper'), 2)}]"
+                if row.get("hit_lower") is not None else "n/a"
+            )
+            rows.append(f"""
+    <tr>
+      <td>{_esc(row.get("feature_set"))}</td>
+      <td>{_esc(row.get("model"))}</td>
+      <td><code>{_esc(row.get("target"))}</code></td>
+      <td>{_esc(row.get("kind"))}</td>
+      <td>{int(row.get("fitted_folds") or 0)}</td>
+      <td>{_num(row.get("mae"), 3)}</td>
+      <td>{_num(row.get("directional_accuracy"), 3)}</td>
+      <td>{_num(row.get("balanced_accuracy"), 3)}</td>
+      <td>{interval}</td>
+    </tr>""")
+        body = f"""
+  <div class="table-scroll">
+  <table class="regime">
+    <thead><tr>
+      <th>Feature set</th><th>Model</th><th>Target</th><th>Kind</th>
+      <th>Folds</th><th>MAE</th><th>Direction</th><th>Balanced</th>
+      <th>Hit-rate 95% CI</th>
+    </tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table>
+  </div>
+  <p class="sub">{len(blocked)} specification(s) were blocked by the sample-size
+  gate and were not fitted. A blocked specification is reported, not hidden:
+  the binding requirement is stored with it.</p>"""
+
+    return f"""
+<section class="card" id="validation">
+  <h2>Walk-Forward Validation</h2>
+  <p class="sub">
+    <strong>Retrospective exploration on already-collected data, not an
+    untouched future test.</strong> Folds run forward in time and no training
+    fold postdates its test fold, but the corpus was collected and inspected
+    before the protocol was written.
+  </p>
+  <p class="sub versions">
+    protocol <code>{_esc(protocol_hash[:16])}</code> ·
+    geometry <code>{_esc(geometry)}</code> ·
+    {int(latest.get("session_count") or 0)} sessions ·
+    {int(latest.get("fold_count") or 0)} folds ·
+    verdict <span class="suff verdict-{_esc(verdict)}">{_esc(verdict)}</span>
+  </p>
+  {body}
+  <p class="legend">
+    The unit is the <strong>session</strong>, not the event: candidate events
+    sharing a reactable session share one index return, so counting them
+    separately would shrink every interval without adding information.
+    Intervals are session-cluster bootstraps. <em>n/a</em> means a value could
+    not be defensibly computed. <strong>No prediction, ranking or trading
+    recommendation is shown, and none of these results is described as
+    significant.</strong>
+  </p>
+</section>
 """

@@ -166,6 +166,32 @@ def _events_html(db_path: str) -> str:
         )
 
 
+def _validation_html(db_path: str) -> str:
+    """Build the walk-forward fragment, degrading visibly on failure."""
+    try:
+        from dashboard_regime import render_validation_section
+
+        runs = db.read_table("validation_runs", db_path)
+        if runs.empty:
+            return render_validation_section(runs, None)
+        results = db.read_table("validation_results", db_path)
+        latest = runs.sort_values("validation_run_id").iloc[-1]
+        return render_validation_section(
+            runs, results,
+            protocol_hash=str(latest.get("protocol_hash") or ""),
+            geometry=str(
+                (json.loads(latest["counts_json"]) or {}).get("window_name", "")
+                if latest.get("counts_json") else ""
+            ),
+        )
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("Validation section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>Walk-Forward Validation</h2>'
+            '<p class="null">This section could not be rendered.</p></section>'
+        )
+
+
 # -- Rendering helpers -----------------------------------------------------------
 
 def _mood(score: float) -> tuple[str, str, str]:
@@ -209,7 +235,7 @@ _CAT_LABELS = {
 def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     d = _collect(db_path)
     regime_html = _regime_html(db_path)
-    events_html = _events_html(db_path)
+    events_html = _events_html(db_path) + _validation_html(db_path)
 
     # -- Chart data --
     labels   = [r["date"][5:] for r in d["sent"]]              # MM-DD

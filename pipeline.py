@@ -910,7 +910,15 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
             CLUSTER_ALGORITHM_VERSION, group_candidate_events, summarise_event,
         )
         from events.entities import ENTITY_RULE_VERSION
-        from research.dataset import build_event_dataset, dataset_coverage
+        from research.controls import build_control_panel
+        from research.dataset import (
+            DATASET_VERSION, build_event_dataset, dataset_coverage,
+        )
+        from research.return_windows import RETURN_WINDOW_VERSION
+        from research.modelling_unit import (
+            MODELLING_UNIT_VERSION, attach_lagged_features, build_session_units,
+            unit_counts,
+        )
 
         frame = db.get_classified_headlines(db_path=db_path)
         if frame.empty:
@@ -939,19 +947,10 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
             if group.primary_entity:
                 seen_entities[group.primary_entity] = prior + 1
 
-            # The most restrictive member timing governs tradability: a position
-            # could not open before the last defining headline was public.
-            order = {
-                "during_session": 0, "unknown": 1, "weekend_or_holiday": 2,
-                "post_close": 3, "pre_open": 4,
-            }
-            buckets = [
-                member.get("timing_bucket") for member in group.members
-                if member.get("timing_bucket")
-            ]
-            summary["timing_bucket"] = (
-                min(buckets, key=lambda b: order.get(b, 1)) if buckets else "unknown"
-            )
+            # Timing is derived once, in research.timing, from the governing
+            # member -- the last one published. Re-deriving a bucket here is
+            # what previously paired one member's bucket with another member's
+            # session, so this step now only reads what summarise_event carried.
             timing_by_group[group.group_key] = summary["timing_bucket"]
 
             group_rows.append(summary)
@@ -997,10 +996,29 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
         db.upsert_event_return_windows(built["windows"], db_path=db_path)
         db.upsert_control_residuals(built["residuals"], db_path=db_path)
         db.upsert_event_dataset(built["dataset"], db_path=db_path)
+        # Windows built under a superseded rule version are one session late,
+        # not merely old. Leaving them beside the corrected rows would let a
+        # query that filters by group key alone return the wrong number.
+        pruned = db.prune_superseded_event_derivations(
+            rule_version=RETURN_WINDOW_VERSION,
+            dataset_version=DATASET_VERSION, db_path=db_path,
+        )
+
+        # The frozen modelling view. Built here so the walk-forward stage never
+        # has to reconstruct the sample and risk reconstructing it differently.
+        units = attach_lagged_features(
+            build_session_units(built["dataset"]),
+            factor_panel=build_control_panel(factor_rows),
+        )
+        db.replace_session_modelling_units(
+            units, modelling_unit_version=MODELLING_UNIT_VERSION, db_path=db_path,
+        )
 
         coverage = dataset_coverage(built["dataset"])
+        counts = unit_counts(built["dataset"], units)
         singletons = sum(row["is_singleton"] for row in group_rows)
         single_source = sum(row["is_single_source"] for row in group_rows)
+        conflicts = sum(int(row.get("timing_conflict") or 0) for row in group_rows)
 
         # Zero tradable windows is only meaningful once there were enough
         # candidate events to expect one; on a thin corpus it says nothing.
@@ -1024,13 +1042,17 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
             "windows": len(built["windows"]),
             "residuals": len(built["residuals"]),
             "coverage": coverage,
+            "timing_conflict_groups": conflicts,
+            "session_units": len(units),
+            "unit_counts": counts,
+            "superseded_rows_pruned": pruned,
             "experiment_id": experiment_id,
         }
         logger.info(
-            "Events complete: %d candidate groups (%d singleton, %d single-source) "
-            "| %d windows | %d dataset rows",
-            stored["groups"], singletons, single_source,
-            len(built["windows"]), len(built["dataset"]),
+            "Events complete: %d candidate groups (%d singleton, %d single-source, "
+            "%d timing-conflicted) | %d windows | %d dataset rows | %d session units",
+            stored["groups"], singletons, single_source, conflicts,
+            len(built["windows"]), len(built["dataset"]), len(units),
         )
         outcome = StepOutcome(
             count=stored["groups"], status="success",

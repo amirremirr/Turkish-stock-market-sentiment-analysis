@@ -544,6 +544,103 @@ BEGIN
     SELECT RAISE(ABORT, 'experiment_assignment_audit is append-only');
 END;
 
+-- The frozen modelling view: one independent row per (reactable session,
+-- target window). Events sharing a session share one index return, so a
+-- session-level row is the unit inference is entitled to count.
+CREATE TABLE IF NOT EXISTS session_modelling_units (
+    first_reactable_session TEXT NOT NULL,
+    window_name             TEXT NOT NULL,
+    modelling_unit          TEXT NOT NULL,
+    modelling_unit_version  TEXT NOT NULL,
+    event_count_raw         INTEGER NOT NULL,
+    group_keys              TEXT,
+    entry_date              TEXT,
+    exit_date               TEXT,
+    dominant_family         TEXT,
+    dominant_timing_bucket  TEXT,
+    raw_return              REAL,
+    residual_none           REAL,
+    residual_em_lagged      REAL,
+    residual_em_oil_fx_lagged REAL,
+    residual_em_contemporaneous REAL,
+    features_json           TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    PRIMARY KEY (first_reactable_session, window_name, modelling_unit_version)
+);
+
+-- One row per frozen protocol. The hash is the freeze: a changed hash means a
+-- different study, not a revision of this one.
+CREATE TABLE IF NOT EXISTS validation_protocols (
+    protocol_hash     TEXT PRIMARY KEY,
+    protocol_version  TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    specification_json TEXT NOT NULL,
+    dataset_version   TEXT NOT NULL,
+    feature_version   TEXT NOT NULL,
+    target_version    TEXT NOT NULL,
+    frozen_at         TEXT NOT NULL
+);
+
+-- One row per execution of a protocol, with the provenance needed to repeat it.
+CREATE TABLE IF NOT EXISTS validation_runs (
+    validation_run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    protocol_hash     TEXT NOT NULL REFERENCES validation_protocols(protocol_hash),
+    code_commit       TEXT,
+    database_snapshot TEXT,
+    experiment_id     TEXT,
+    session_count     INTEGER,
+    fold_count        INTEGER,
+    specifications_run     INTEGER,
+    specifications_blocked INTEGER,
+    verdict           TEXT,
+    counts_json       TEXT,
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT
+);
+
+-- One row per (feature set, model, target). A blocked specification is recorded
+-- with its binding requirement rather than omitted, so the reader sees what was
+-- not attempted and why.
+CREATE TABLE IF NOT EXISTS validation_results (
+    validation_run_id INTEGER NOT NULL REFERENCES validation_runs(validation_run_id),
+    feature_set       TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    target            TEXT NOT NULL,
+    kind              TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    binding_requirement TEXT,
+    rows_complete     INTEGER,
+    usable_sessions   INTEGER,
+    fitted_folds      INTEGER,
+    mae               REAL,
+    rmse              REAL,
+    pearson_r         REAL,
+    directional_accuracy REAL,
+    balanced_accuracy REAL,
+    brier_score       REAL,
+    hit_lower         REAL,
+    hit_upper         REAL,
+    stability_json    TEXT,
+    subgroups_json    TEXT,
+    PRIMARY KEY (validation_run_id, feature_set, model, target)
+);
+
+-- Every out-of-sample prediction, so a reported metric can be recomputed.
+CREATE TABLE IF NOT EXISTS validation_predictions (
+    validation_run_id TEXT NOT NULL,
+    feature_set       TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    target            TEXT NOT NULL,
+    fold              INTEGER NOT NULL,
+    first_reactable_session TEXT NOT NULL,
+    exit_date         TEXT,
+    actual            REAL,
+    predicted         REAL,
+    probability       REAL,
+    PRIMARY KEY (validation_run_id, feature_set, model, target,
+                 first_reactable_session)
+);
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -628,6 +725,30 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("headlines", "market_recap_rule",     "TEXT"),
     ("headlines", "market_recap_evidence", "TEXT"),
     ("headlines", "market_recap_confidence", "REAL"),
+    # Event timing (research/timing.py). first_reactable_session duplicates
+    # signal_date deliberately: signal_date's meaning was implied by three call
+    # sites that disagreed, and a field whose name states the semantics cannot
+    # be misread the way the old one was.
+    ("event_groups", "timing_bucket",             "TEXT"),
+    ("event_groups", "first_reactable_session",   "TEXT"),
+    ("event_groups", "first_reactable_at",        "TEXT"),
+    ("event_groups", "event_information_cutoff",  "TEXT"),
+    ("event_groups", "event_timing_rule_version", "TEXT"),
+    ("event_groups", "governing_headline_id",     "INTEGER"),
+    ("event_groups", "timing_conflict",           "INTEGER NOT NULL DEFAULT 0"),
+    ("event_groups", "timing_conflict_reason",    "TEXT"),
+    ("event_groups", "member_session_count",      "INTEGER"),
+    # A window whose entry predates publication measures reaction but could not
+    # have been traded. The flag keeps the two uses separable.
+    ("event_return_windows", "is_tradable",         "INTEGER NOT NULL DEFAULT 1"),
+    ("event_return_windows", "not_tradable_reason", "TEXT"),
+    ("event_research_dataset", "first_reactable_session",   "TEXT"),
+    ("event_research_dataset", "first_reactable_at",        "TEXT"),
+    ("event_research_dataset", "event_information_cutoff",  "TEXT"),
+    ("event_research_dataset", "event_timing_rule_version", "TEXT"),
+    ("event_research_dataset", "timing_conflict",           "INTEGER NOT NULL DEFAULT 0"),
+    ("event_research_dataset", "timing_conflict_reason",    "TEXT"),
+    ("event_research_dataset", "is_tradable_window",        "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 
@@ -1829,7 +1950,11 @@ def replace_event_groups(
             "cross_source_dispersion", "strong_positive_count",
             "strong_negative_count", "market_recap_count", "is_singleton",
             "is_single_source", "novelty", "prior_entity_events",
-            "review_state", "updated_at",
+            "review_state", "timing_bucket", "first_reactable_session",
+            "first_reactable_at", "event_information_cutoff",
+            "event_timing_rule_version", "governing_headline_id",
+            "timing_conflict", "timing_conflict_reason", "member_session_count",
+            "updated_at",
         ]
         con.executemany(
             f"INSERT OR REPLACE INTO event_groups ({','.join(columns)}) "
@@ -1924,7 +2049,8 @@ def upsert_event_return_windows(rows, db_path: str = DB_PATH) -> int:
         "group_key", "algorithm_version", "window_name", "information_cutoff",
         "assumed_execution", "entry_price_field", "exit_price_field",
         "entry_date", "exit_date", "entry_price", "exit_price", "raw_return",
-        "is_available", "unavailable_reason", "rule_version", "updated_at",
+        "is_available", "unavailable_reason", "is_tradable",
+        "not_tradable_reason", "rule_version", "updated_at",
     ], rows, db_path)
 
 
@@ -1947,8 +2073,203 @@ def upsert_event_dataset(rows, db_path: str = DB_PATH) -> int:
         "entry_date", "exit_date", "raw_return", "residual_none",
         "residual_em_lagged", "residual_em_oil_fx_lagged",
         "residual_em_contemporaneous", "blocked_features", "dataset_version",
+        "first_reactable_session", "first_reactable_at",
+        "event_information_cutoff", "event_timing_rule_version",
+        "timing_conflict", "timing_conflict_reason", "is_tradable_window",
         "updated_at",
     ], rows, db_path)
+
+
+def prune_superseded_event_derivations(
+    *,
+    rule_version: str,
+    dataset_version: str,
+    db_path: str = DB_PATH,
+) -> Dict[str, int]:
+    """Delete derived rows written under a superseded rule or dataset version.
+
+    These tables are *derived* — every row can be rebuilt from headlines and
+    price bars, neither of which is touched here. Keeping the old rows would be
+    worse than deleting them: the v1 windows are not merely stale, they are
+    known to be one session late, and a reader filtering by group key rather
+    than by version would silently get the wrong number.
+
+    Raw observations, scores, categories and the append-only audit tables are
+    never in scope.
+    """
+    with _conn(db_path) as con:
+        windows = con.execute(
+            "DELETE FROM event_return_windows WHERE rule_version <> ?",
+            (rule_version,),
+        ).rowcount
+        dataset = con.execute(
+            "DELETE FROM event_research_dataset WHERE dataset_version <> ?",
+            (dataset_version,),
+        ).rowcount
+    return {"windows_removed": max(0, windows), "dataset_rows_removed": max(0, dataset)}
+
+
+def replace_session_modelling_units(
+    units: Sequence[Dict[str, Any]],
+    *,
+    modelling_unit_version: str,
+    db_path: str = DB_PATH,
+) -> int:
+    """Rebuild the frozen modelling view for one unit version.
+
+    Rows for this version are replaced wholesale so a rerun is idempotent;
+    another version's rows are untouched, which is what lets a superseded unit
+    definition stay readable beside its replacement.
+    """
+    import json as _json
+
+    now = _now_iso()
+    feature_columns = {
+        "first_reactable_session", "window_name", "modelling_unit",
+        "modelling_unit_version", "event_count_raw", "group_keys",
+        "entry_date", "exit_date", "dominant_family", "dominant_timing_bucket",
+        "raw_return", "residual_none", "residual_em_lagged",
+        "residual_em_oil_fx_lagged", "residual_em_contemporaneous",
+    }
+    columns = [
+        "first_reactable_session", "window_name", "modelling_unit",
+        "modelling_unit_version", "event_count_raw", "group_keys",
+        "entry_date", "exit_date", "dominant_family", "dominant_timing_bucket",
+        "raw_return", "residual_none", "residual_em_lagged",
+        "residual_em_oil_fx_lagged", "residual_em_contemporaneous",
+        "features_json", "updated_at",
+    ]
+    with _conn(db_path) as con:
+        con.execute(
+            "DELETE FROM session_modelling_units WHERE modelling_unit_version = ?",
+            (modelling_unit_version,),
+        )
+        con.executemany(
+            f"INSERT OR REPLACE INTO session_modelling_units "
+            f"({','.join(columns)}) VALUES ({','.join('?' * len(columns))})",
+            [
+                tuple(
+                    now if column == "updated_at"
+                    else _json.dumps(
+                        {k: v for k, v in unit.items() if k not in feature_columns},
+                        sort_keys=True, default=str,
+                    ) if column == "features_json"
+                    else unit.get(column)
+                    for column in columns
+                )
+                for unit in units
+            ],
+        )
+    return len(units)
+
+
+def record_validation_protocol(
+    document: Dict[str, Any], db_path: str = DB_PATH,
+) -> str:
+    """Store a frozen protocol, keyed by its hash. Re-freezing is a no-op."""
+    import json as _json
+
+    specification = document["specification"]
+    with _conn(db_path) as con:
+        con.execute(
+            """INSERT OR IGNORE INTO validation_protocols
+               (protocol_hash, protocol_version, status, specification_json,
+                dataset_version, feature_version, target_version, frozen_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                document["protocol_hash"],
+                specification["protocol_version"],
+                specification["status"],
+                _json.dumps(specification, sort_keys=True, ensure_ascii=False),
+                document["provenance"]["dataset_version"],
+                document["provenance"]["feature_version"],
+                document["provenance"]["target_version"],
+                document["provenance"].get("generated_at") or _now_iso(),
+            ),
+        )
+    return str(document["protocol_hash"])
+
+
+def record_validation_run(
+    *,
+    protocol_hash: str,
+    code_commit: Optional[str],
+    database_snapshot: Optional[str],
+    experiment_id: Optional[str],
+    session_count: int,
+    fold_count: int,
+    specifications: Sequence[Dict[str, Any]],
+    comparison: Dict[str, Any],
+    counts: Dict[str, Any],
+    started_at: str,
+    db_path: str = DB_PATH,
+) -> int:
+    """Persist one protocol execution with all its specifications."""
+    import json as _json
+
+    with _conn(db_path) as con:
+        cursor = con.execute(
+            """INSERT INTO validation_runs
+               (protocol_hash, code_commit, database_snapshot, experiment_id,
+                session_count, fold_count, specifications_run,
+                specifications_blocked, verdict, counts_json, started_at,
+                finished_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                protocol_hash, code_commit, database_snapshot, experiment_id,
+                session_count, fold_count,
+                comparison.get("specifications_run", 0),
+                comparison.get("specifications_blocked", 0),
+                comparison.get("verdict"),
+                _json.dumps(counts, sort_keys=True, default=str),
+                started_at, _now_iso(),
+            ),
+        )
+        run_id = int(cursor.lastrowid)
+
+        for specification in specifications:
+            pooled = specification.get("pooled") or {}
+            interval = pooled.get("directional_hit_interval") or {}
+            con.execute(
+                """INSERT OR REPLACE INTO validation_results
+                   (validation_run_id, feature_set, model, target, kind, status,
+                    binding_requirement, rows_complete, usable_sessions,
+                    fitted_folds, mae, rmse, pearson_r, directional_accuracy,
+                    balanced_accuracy, brier_score, hit_lower, hit_upper,
+                    stability_json, subgroups_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, specification["feature_set"], specification["model"],
+                    specification["target"], specification["kind"],
+                    specification["status"],
+                    specification["gate"].get("binding_requirement"),
+                    specification["gate"].get("rows_complete"),
+                    specification["gate"].get("usable_sessions"),
+                    (specification.get("stability") or {}).get("fitted_folds"),
+                    pooled.get("mae"), pooled.get("rmse"),
+                    pooled.get("pearson_r"), pooled.get("directional_accuracy"),
+                    pooled.get("balanced_accuracy"), pooled.get("brier_score"),
+                    interval.get("lower"), interval.get("upper"),
+                    _json.dumps(specification.get("stability") or {}, default=str),
+                    _json.dumps(specification.get("subgroups") or {}, default=str),
+                ),
+            )
+            con.executemany(
+                """INSERT OR REPLACE INTO validation_predictions
+                   (validation_run_id, feature_set, model, target, fold,
+                    first_reactable_session, exit_date, actual, predicted,
+                    probability)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    (str(run_id), specification["feature_set"],
+                     specification["model"], specification["target"],
+                     prediction["fold"], prediction["first_reactable_session"],
+                     prediction.get("exit_date"), prediction.get("actual"),
+                     prediction.get("predicted"), prediction.get("probability"))
+                    for prediction in specification.get("predictions") or []
+                ],
+            )
+    return run_id
 
 
 def read_table(table: str, db_path: str = DB_PATH, order_by: str = "") -> pd.DataFrame:

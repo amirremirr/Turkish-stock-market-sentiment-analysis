@@ -101,6 +101,36 @@ def test_demo_reports_camp_disagreement_where_both_camps_are_present(demo_artifa
     assert monetary["min_sources_met"] == 1
 
 
+def test_demo_shows_the_timing_convention(demo_artifacts):
+    """A reader must be able to see what signal_date means, not be told."""
+
+    summary = json.loads(demo_artifacts["summary"].read_text(encoding="utf-8"))
+    timing = summary["timing_convention"]
+    assert timing["signal_date_means"] == "first_reactable_session"
+
+    buckets = {row["timing_bucket"] for row in timing["examples"]}
+    assert "pre_open" in buckets
+    # The buckets that distinguish "publication session" from "reactable
+    # session" must be visible; without one the convention is unfalsifiable.
+    assert buckets & {"post_close", "weekend_or_holiday", "unknown"}
+
+    for row in timing["examples"]:
+        if row["entry"] is not None:
+            assert row["entry"] == row["first_reactable_session"]
+            assert row["exit"] == row["first_reactable_session"]
+            assert row["previous_trading_session"] < row["first_reactable_session"]
+
+
+def test_demo_shows_duplicated_outcomes_collapsing_to_sessions(demo_artifacts):
+    """Many events, far fewer independent outcomes -- the number must be shown."""
+
+    summary = json.loads(demo_artifacts["summary"].read_text(encoding="utf-8"))
+    unit = summary["statistical_unit"]
+    assert unit["session_units"] == unit["distinct_sessions"]
+    assert unit["event_rows"] > unit["distinct_outcomes"]
+    assert unit["duplication_factor"] > 1.0
+
+
 def test_demo_makes_no_predictive_claim(demo_artifacts):
     """The demo may deny a predictive claim; it must never make one."""
 
