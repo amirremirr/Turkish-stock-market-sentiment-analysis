@@ -203,7 +203,7 @@
   },
   "fold_geometry": null,
   "folds": [],
-  "frozen_at": "2026-08-07T22:21:29.373220+00:00",
+  "frozen_at": "2026-08-07T22:50:14.203495+00:00",
   "immutability_note": "This artifact records a completed study. A later protocol version that performs differently does not revise it; that is a different study with its own artifact.",
   "multiplicity_note": "10 news specifications were compared; at alpha 0.05 roughly 1 would clear a nominal threshold by chance alone. No result below is described as significant.",
   "out_of_sample_predictions": [

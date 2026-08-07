@@ -1,7 +1,7 @@
 {
   "allowed_feature_versions": {
-    "control_set_version": "control-sets-v1",
-    "dataset_version": "event-research-dataset-v2",
+    "control_set_version": "control-sets-v2",
+    "dataset_version": "event-research-dataset-v3",
     "feature_sets": [
       "abnormal_tone",
       "ar1",
@@ -22,7 +22,7 @@
     "timing_rule_version": "event-timing-v1"
   },
   "boundary_rule": "an observation is untouched only if its first reactable session is at or after first_eligible_session",
-  "definition_hash": "8bf609846a384e61905e8d682fdc7ab3adf68efc140942ae65cd4bda81b84f10",
+  "definition_hash": "fbad5c8216cef14be2702c09aa7ffb4d6b84cf4fcff66f77e4fd78c4fc83891e",
   "first_eligible_session": "2026-08-10",
   "fold_geometry": {
     "applies_when_sessions_at_least": 51,
