@@ -36,9 +36,16 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-import database as db
 from config import DB_PATH
 from price_bars import after_close_refresh_allowed
+
+# ``database`` and ``pipeline`` are imported lazily, inside the functions that
+# need them. The guard answers a pure clock-and-calendar question -- has the
+# Istanbul session settled? -- and its dependency chain (price_bars ->
+# trading_calendar -> config) is stdlib only. A module-level ``import database``
+# pulled pandas into that path and made ``--check-only`` fail on a runner that
+# had not installed dependencies yet, which is exactly the step the guard is
+# meant to run before.
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +56,8 @@ EXIT_FAILED = 1
 
 
 def _price_snapshot(db_path: str) -> Dict[str, Any]:
+    import database as db
+
     with db._conn(db_path) as con:
         rows = con.execute(
             "SELECT bar_status, COUNT(*) AS n FROM bist100_prices GROUP BY bar_status"
@@ -85,6 +94,7 @@ def run(
     before = _price_snapshot(db_path)
 
     # Imported here so --check-only never pulls in the network stack.
+    import database as db
     import pipeline
 
     prices = pipeline.prices_step(db_path=db_path, return_outcome=True)
@@ -128,7 +138,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
     )
     args = build_parser().parse_args(argv)
-    if not Path(args.db).exists():
+    # Only a real refresh needs a database. The guard runs before the workflow
+    # has restored one, and refusing there would make the settlement decision
+    # depend on a file it never reads.
+    if not args.check_only and not Path(args.db).exists():
         print(f"database not found: {args.db}", file=sys.stderr)
         return EXIT_FAILED
 

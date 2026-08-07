@@ -381,6 +381,61 @@ def test_check_only_skips_without_touching_the_database(tmp_path):
     assert result["decision"]["reason"] == "before_settlement"
 
 
+def test_guard_needs_no_database_file():
+    """The settlement decision is a clock question, not a data question.
+
+    The workflow runs the guard before restoring the snapshot. Refusing there
+    would make the decision depend on a file the guard never reads -- which is
+    one of the two faults that broke the scheduled job on 2026-08-06/07.
+    """
+
+    from scripts.after_close_refresh import main
+
+    assert main([
+        "--db", "no/such/database.db", "--check-only",
+        "--now", f"{FULL_DAY}T09:00:00+03:00",
+    ]) == 0
+
+
+def test_guard_imports_nothing_outside_the_standard_library():
+    """The other fault: --check-only pulled in pandas through ``database``.
+
+    The guard runs before dependencies are installed, so its import chain must
+    stay stdlib-only. Asserted by walking the chain in a subprocess with the
+    data stack blocked, rather than by trusting a comment.
+    """
+
+    import subprocess
+    import sys as _sys
+
+    probe = (
+        "import sys\n"
+        "for name in ('pandas', 'numpy', 'yfinance', 'requests', 'torch'):\n"
+        "    sys.modules[name] = None\n"
+        "import scripts.after_close_refresh as m\n"
+        "print(m.main(['--db', 'missing.db', '--check-only',\n"
+        f"              '--now', '{FULL_DAY}T09:00:00+03:00']))\n"
+    )
+    completed = subprocess.run(
+        [_sys.executable, "-c", probe], cwd=str(REPOSITORY_ROOT),
+        capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip().endswith("0")
+
+
+def test_guard_runs_before_dependencies_are_installed():
+    """Step order is part of the fix and must not drift back."""
+
+    steps = _workflow("after_close_prices.yml")["jobs"]["refresh"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+    guard = next(i for i, n in enumerate(names) if "guard" in n.lower())
+    setup = next(i for i, n in enumerate(names) if "set up python" in n.lower())
+    install = next(i for i, n in enumerate(names) if "install" in n.lower())
+    assert setup < guard, "the guard needs a pinned interpreter"
+    assert guard < install, "the guard must decide before deps are installed"
+
+
 def test_before_settlement_is_a_no_op(tmp_path, monkeypatch):
     from scripts import after_close_refresh
 
@@ -442,16 +497,37 @@ def test_after_close_workflow_never_commits_readme_figures():
 
 
 def test_after_close_workflow_runs_a_runtime_guard_before_any_work():
+    """Everything that does work must wait for the guard.
+
+    Checking out the repo and setting up an interpreter are what the guard
+    needs in order to run at all, so they precede it unconditionally. They are
+    exempt by name rather than by position: an ungated step that fetched data,
+    installed the stack or wrote the snapshot would still fail this.
+    """
+
     after = _workflow("after_close_prices.yml")
     steps = after["jobs"]["refresh"]["steps"]
     guard = next(s for s in steps if s["name"].startswith("Check the Istanbul"))
     assert "--check-only" in guard["run"]
-    for step in steps:
-        if step["name"] in ("Checkout repo (main)", guard["name"]):
+
+    prerequisites = {"Checkout repo (main)", "Set up Python", guard["name"]}
+    for index, step in enumerate(steps):
+        if step["name"] in prerequisites:
+            # A prerequisite must actually come first; one appearing after the
+            # guard would be doing work under an exemption it does not deserve.
+            assert index <= steps.index(guard), step["name"]
             continue
         if step["name"] == "Report skip":
             continue
         assert "steps.guard.outputs.allowed == 'true'" in step.get("if", ""), step["name"]
+
+    # The prerequisites are also the only steps allowed to be that cheap: none
+    # of them may touch the database, the network stack or the data branch.
+    for step in steps[:steps.index(guard)]:
+        body = str(step.get("run", "")) + str(step.get("uses", ""))
+        for forbidden in ("finance_sentiment.db", "pip install", "origin/data",
+                          "git push"):
+            assert forbidden not in body, f"{step['name']} does work before the guard"
 
 
 def test_after_close_schedule_is_weekdays_only():
