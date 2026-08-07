@@ -403,6 +403,10 @@ def render_event_section(
 
 
 EVENT_CSS = """
+.toc { margin:14px 0 22px; display:flex; flex-wrap:wrap; gap:8px; }
+.toc a { font-size:12px; padding:5px 11px; border-radius:14px; text-decoration:none;
+         background:#eef2f7; color:#3b4c5e; border:1px solid #dbe3ec; }
+.toc a:hover { background:#dbe3ec; }
 .suff-unreviewed { background:#eef2f7; color:#3b4c5e; }
 .suff-confirmed { background:#e6f4ea; color:#1e4620; }
 .suff-rejected { background:#f3e6e6; color:#6b1e1e; }

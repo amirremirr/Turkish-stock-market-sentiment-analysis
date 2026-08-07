@@ -422,6 +422,17 @@ __REGIME_CSS__
   agreement with this project's held-out human-label rubric. Market-return analysis remains
   exploratory and is not a validated strategy. Nothing here is investment advice.</div>
 
+  <nav class="toc">
+    <a href="#data-health">Data Health</a>
+    <a href="#news-regime">News Regime</a>
+    <a href="#signal-families">Signal Families</a>
+    <a href="#candidate-events">Candidate Events</a>
+    <a href="#windows">Market Windows</a>
+    <a href="#validation">Predictive Validation</a>
+    <a href="#future">Future Validation</a>
+  </nav>
+
+  <h2 id="data-health">Data Health</h2>
   <div class="grid">
     <div class="card">
       <h3>Latest session-aligned news mood</h3>
@@ -448,7 +459,7 @@ __REGIME_CSS__
     <canvas id="mainChart" height="95"></canvas>
   </div>
 
-  <div class="charts">
+  <div class="charts" id="signal-families">
     <div class="card">
       <h3>Latest headlines</h3>
       <table>
