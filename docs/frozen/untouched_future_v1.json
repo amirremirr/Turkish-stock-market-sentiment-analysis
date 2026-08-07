@@ -1,0 +1,133 @@
+{
+  "allowed_feature_versions": {
+    "control_set_version": "control-sets-v1",
+    "dataset_version": "event-research-dataset-v2",
+    "feature_sets": [
+      "abnormal_tone",
+      "ar1",
+      "attention_shock",
+      "controls_plus_news",
+      "disagreement",
+      "event_tone_novelty",
+      "family_signals",
+      "headline_count_only",
+      "market_controls_only",
+      "net_tone_share",
+      "none",
+      "previous_direction"
+    ],
+    "feature_version": "session-features-v1",
+    "modelling_unit_version": "modelling-unit-v1",
+    "return_window_version": "return-windows-v2",
+    "timing_rule_version": "event-timing-v1"
+  },
+  "boundary_rule": "an observation is untouched only if its first reactable session is at or after first_eligible_session",
+  "definition_hash": "8bf609846a384e61905e8d682fdc7ab3adf68efc140942ae65cd4bda81b84f10",
+  "first_eligible_session": "2026-08-10",
+  "fold_geometry": {
+    "applies_when_sessions_at_least": 51,
+    "can_declare_success": true,
+    "initial_train_sessions": 40,
+    "minimum_test_sessions_per_fold": 8,
+    "name": "primary",
+    "step_sessions": 10,
+    "test_sessions": 10
+  },
+  "frozen_retrospective_artifact_hash": "bfdbadb00cba7922404ca9d7b93187e47a108d80cd1e3d3bdf102facb6d0b7d0",
+  "hyperparameters": {
+    "logistic": {
+      "l2": 1.0,
+      "learning_rate": 0.1,
+      "max_iterations": 200,
+      "standardise": true
+    },
+    "majority": {},
+    "mean": {},
+    "ridge": {
+      "alpha": 1.0,
+      "standardise": true
+    }
+  },
+  "kind": "untouched_future_validation",
+  "minimum_evaluation_horizon_days": 120,
+  "models": {
+    "logistic": {
+      "description": "L2-regularised logistic regression on the return sign.",
+      "family": "logistic",
+      "hyperparameters": {
+        "l2": 1.0,
+        "learning_rate": 0.1,
+        "max_iterations": 200,
+        "standardise": true
+      },
+      "task": "classification"
+    },
+    "majority": {
+      "description": "Training-fold majority direction.",
+      "family": "constant",
+      "hyperparameters": {},
+      "task": "classification"
+    },
+    "mean": {
+      "description": "Training-fold mean; the null a model must beat.",
+      "family": "constant",
+      "hyperparameters": {},
+      "task": "regression"
+    },
+    "ridge": {
+      "description": "L2-regularised least squares on standardised features.",
+      "family": "linear",
+      "hyperparameters": {
+        "alpha": 1.0,
+        "standardise": true
+      },
+      "task": "regression"
+    }
+  },
+  "on_failure": "A failed future validation is reported as a failed future validation. It does not license a revised protocol presented as the same test.",
+  "protocol_hash": "d987de7bb0dceaeea91ef358080b4aaaa099359e0e6fbb26f51eff62d39d27d5",
+  "sample_size_requirement": {
+    "derived_from": "primary fold geometry: 40 train + 1 embargo + 10 test",
+    "minimum_control_observations": 30,
+    "minimum_distinct_outcomes": 51,
+    "minimum_sessions": 51
+  },
+  "sealed": [
+    "feature design",
+    "feature selection",
+    "model selection",
+    "hyperparameters",
+    "target choice",
+    "decision thresholds",
+    "success criteria"
+  ],
+  "sealing_rule": "No observation on or after first_eligible_session may influence any sealed item. Outcome statistics for the untouched sample are not computed or displayed until the sample-size requirement is met; inspecting performance while a sample accumulates and stopping when it looks favourable is optional-stopping, which inflates the false-positive rate invisibly.",
+  "success_criteria": {
+    "failure": "no news feature set clears the margins, or the sample gate blocks the comparison",
+    "inconclusive": "margins cleared in fewer than a majority of folds, or fewer than three folds are fittable",
+    "reporting_rule": "failure and inconclusive results are reported in full; the protocol is not re-run with different settings to obtain a different answer",
+    "success": "a news feature set beats every baseline on MAE and directional accuracy by the stated margins, in a majority of folds, with session-cluster-aware intervals excluding the baseline"
+  },
+  "target": {
+    "column": "raw_return",
+    "definition": "percent return from the open to the close of the first session able to react to the news",
+    "eligible_timing_buckets": [
+      "post_close",
+      "pre_open",
+      "weekend_or_holiday"
+    ],
+    "market_recap_excluded": true,
+    "timing_conflicts_excluded": true,
+    "version": "reactable-open-to-close-v1",
+    "window": "reactable_open_to_close"
+  },
+  "thresholds": {
+    "alpha": 0.05,
+    "direction_threshold": 0.0,
+    "minimum_directional_accuracy_over_majority": 0.05,
+    "minimum_improvement_over_best_baseline_mae": 0.05,
+    "multiplicity": "no specification is declared significant without an explicit correction for the number of specifications run"
+  },
+  "validation_start": "2026-08-08T00:00:00+00:00",
+  "version": "untouched_future_v1"
+}
