@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 from events.entities import classify_event_type, extract_entities
+from research.timing import derive_event_timing
 from taxonomy.signal_family import normalize
 from trading_calendar import ISTANBUL
 
@@ -326,6 +327,13 @@ def summarise_event(
     # cannot disagree with itself.
     cross_source = _pstdev(source_means) if len(source_means) > 1 else None
 
+    # Timing comes from one governing member -- the last one to be published --
+    # so a bucket and a session can never be taken from different headlines.
+    # ``signal_date`` below is that member's session, not ``signal_dates[0]``:
+    # the earliest would claim the event was actionable before part of it
+    # existed.
+    timing = derive_event_timing(group.members)
+
     return {
         "group_key": group.group_key,
         "algorithm_version": CLUSTER_ALGORITHM_VERSION,
@@ -341,8 +349,9 @@ def summarise_event(
         "unknown_timestamp_count": sum(
             1 for moment in timestamps if moment is None
         ),
-        "signal_date": signal_dates[0] if signal_dates else None,
+        "signal_date": timing.first_reactable_session,
         "signal_date_span": len(signal_dates),
+        **timing.as_row(),
         "mean_sentiment": mean,
         "median_sentiment": median,
         "sentiment_dispersion": dispersion,

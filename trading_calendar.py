@@ -79,6 +79,21 @@ def next_trading_day(day: date) -> date:
     return candidate
 
 
+def previous_trading_day(day: date) -> date:
+    """Return the last trading day strictly before *day*.
+
+    The counterpart to :func:`next_trading_day`. A return window that opens at a
+    session's open needs the close that preceded it, and "yesterday" is the
+    wrong answer across weekends and the nine-day religious holidays Borsa
+    Istanbul observes.
+    """
+
+    candidate = day - timedelta(days=1)
+    while not is_trading_day(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def _next_session_on_or_after(day: date) -> date:
     candidate = day
     while not is_trading_day(candidate):

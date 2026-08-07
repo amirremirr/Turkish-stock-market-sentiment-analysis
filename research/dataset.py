@@ -19,10 +19,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from research.controls import CONTROL_SETS, compute_residual_returns
 from research.return_windows import (
-    BLOCKED, PriceSeries, build_return_windows, timing_eligibility,
+    BLOCKED, PRIMARY_WINDOW, PriceSeries, build_return_windows,
+    timing_eligibility,
 )
+from research.timing import TIMING_RULE_VERSION
 
-DATASET_VERSION = "event-research-dataset-v1"
+DATASET_VERSION = "event-research-dataset-v2"
 
 # Data the project does not have. Recorded on every row so downstream work
 # cannot mistake absence for irrelevance.
@@ -65,7 +67,7 @@ def build_event_dataset(
     for event in events:
         timing = _dominant_timing(event)
         windows = build_return_windows(
-            event.get("signal_date"), timing, prices,
+            _reactable_session(event), timing, prices,
         )
         rows = []
         for window in windows:
@@ -105,10 +107,12 @@ def build_event_dataset(
     blocked = ";".join(f"{key}={reason}" for key, reason in sorted(BLOCKED_FEATURES.items()))
     for event in events:
         timing = _dominant_timing(event)
+        conflict = bool(int(event.get("timing_conflict") or 0))
         eligibility = timing_eligibility(
             timing,
             is_market_recap=bool(event.get("market_recap_count"))
             and int(event.get("market_recap_count", 0)) == int(event.get("headline_count", 0)),
+            timing_conflict=conflict,
         )
         for row in per_event_windows[event["group_key"]]:
             entry = {
@@ -116,7 +120,16 @@ def build_event_dataset(
                 "algorithm_version": algorithm_version,
                 "experiment_id": experiment_id,
                 "window_name": row["window_name"],
-                "signal_date": event.get("signal_date"),
+                "signal_date": _reactable_session(event),
+                "first_reactable_session": _reactable_session(event),
+                "first_reactable_at": event.get("first_reactable_at"),
+                "event_information_cutoff": event.get("event_information_cutoff"),
+                "event_timing_rule_version": event.get(
+                    "event_timing_rule_version", TIMING_RULE_VERSION,
+                ),
+                "timing_conflict": 1 if conflict else 0,
+                "timing_conflict_reason": event.get("timing_conflict_reason"),
+                "is_tradable_window": row["is_tradable"],
                 "signal_family": event.get("signal_family"),
                 "event_type": event.get("event_type"),
                 "primary_entity": event.get("primary_entity"),
@@ -162,15 +175,23 @@ def build_event_dataset(
 def _dominant_timing(event: Dict[str, Any]) -> Optional[str]:
     """The timing bucket that governs an event's tradability.
 
-    An event's members can straddle buckets. The most restrictive one wins,
-    because a position could not have been opened before the last piece of
-    information that defines the event was public.
+    Supplied by :func:`research.timing.derive_event_timing`, which reads it from
+    the same governing member that supplied the reaction session. This function
+    only unwraps it; it must never re-derive a bucket independently, because a
+    bucket from one member paired with a session from another is exactly the
+    combination the timing rule exists to forbid.
     """
 
     timing = event.get("timing_bucket")
     if timing:
         return timing
     return event.get("dominant_timing")
+
+
+def _reactable_session(event: Dict[str, Any]) -> Optional[str]:
+    """The session that can react, preferring the explicit field."""
+
+    return event.get("first_reactable_session") or event.get("signal_date")
 
 
 def dataset_coverage(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -196,14 +217,28 @@ def dataset_coverage(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         for column in RESIDUAL_COLUMNS.values()
     }
 
+    tradable = [row for row in with_return if row.get("is_tradable_window")]
+    primary = [row for row in tradable if row["window_name"] == PRIMARY_WINDOW]
+
     return {
         "total_rows": total,
         "eligible_rows": len(eligible),
         "rows_with_return": len(with_return),
+        "tradable_rows_with_return": len(tradable),
+        "primary_window_rows": len(primary),
         "blocked_reasons": reasons,
         "rows_by_window": windows,
         "residual_coverage": residual_coverage,
         "distinct_events": len({row["group_key"] for row in materialized}),
         "distinct_eligible_events": len({row["group_key"] for row in with_return}),
+        # The count that matters for inference: many events share one session,
+        # and every event on a session shares its index return exactly.
+        "distinct_primary_sessions": len({
+            row.get("first_reactable_session") or row.get("signal_date")
+            for row in primary
+        }),
+        "timing_conflict_rows": sum(
+            1 for row in materialized if row.get("timing_conflict")
+        ),
         "dataset_version": DATASET_VERSION,
     }
