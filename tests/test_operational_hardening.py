@@ -530,6 +530,33 @@ def test_after_close_workflow_runs_a_runtime_guard_before_any_work():
             assert forbidden not in body, f"{step['name']} does work before the guard"
 
 
+def test_validation_is_opt_in_and_never_runs_on_a_schedule():
+    """A frozen protocol re-run every morning invites reading the sequence.
+
+    Re-running is legitimate when the corpus has grown enough to change what
+    the sample gate permits; running it daily produces near-identical studies
+    whose varying verdicts would look like signal.
+    """
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    step = next(s for s in steps if "walk-forward" in str(s.get("name", "")).lower())
+    condition = step["if"]
+    assert "workflow_dispatch" in condition
+    assert "inputs.run_validation" in condition
+
+    inputs = _workflow("daily.yml").get("on", _workflow("daily.yml").get(True))
+    assert inputs["workflow_dispatch"]["inputs"]["run_validation"]["default"] is False
+
+
+def test_validation_step_cannot_score_or_scrape():
+    """It reads stored tables; it must not be handed a scoring credential."""
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    step = next(s for s in steps if "walk-forward" in str(s.get("name", "")).lower())
+    assert "OPENAI_API_KEY" not in str(step.get("env") or {})
+    assert "scrape" not in step["run"] and "main.py run" not in step["run"]
+
+
 def test_after_close_schedule_is_weekdays_only():
     after = _workflow("after_close_prices.yml")
     trigger = after.get("on", after.get(True))

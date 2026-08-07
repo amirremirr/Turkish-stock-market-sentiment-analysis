@@ -17,6 +17,10 @@ on:
         description: "Refresh docs/sample_output.png and commit it to main"
         type: boolean
         default: true
+      run_validation:
+        description: "Execute the frozen walk-forward protocol and store the run"
+        type: boolean
+        default: false
 
 permissions:
   contents: write               # default GITHUB_TOKEN may push the data branch
@@ -58,6 +62,18 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SENTIMENT_BACKEND: llm
         run: python main.py run --no-show
+
+      # Opt-in, not daily. The protocol is frozen: re-running it every morning
+      # would accumulate near-identical studies and invite reading the sequence
+      # of verdicts as evidence. It is worth re-running when the corpus has
+      # grown enough to change what the sample gate permits.
+      #
+      # No key is exposed: this reads stored tables and fits regularised linear
+      # models. It cannot scrape, score, or alter a headline, label, category or
+      # experiment identity.
+      - name: Run the frozen walk-forward protocol
+        if: github.event_name == 'workflow_dispatch' && inputs.run_validation
+        run: python -m scripts.run_validation --db finance_sentiment.db
 
       # Scheduled runs always publish. Only a manual dispatch can opt out, so a
       # rehearsal run can exercise the pipeline without committing a refreshed
