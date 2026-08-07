@@ -21,6 +21,14 @@ on:
         description: "Execute the frozen walk-forward protocol and store the run"
         type: boolean
         default: false
+      backfill_history:
+        description: "Extend market-factor and BIST history (never overwrites)"
+        type: boolean
+        default: false
+      freeze_artifacts:
+        description: "Seal the completed study and redraw the review sample"
+        type: boolean
+        default: false
 
 permissions:
   contents: write               # default GITHUB_TOKEN may push the data branch
@@ -57,11 +65,28 @@ jobs:
       - name: Install slim deps (no torch — LLM backend)
         run: pip install -r requirements-cloud.txt
 
+      # Before the pipeline, so the rebuild that follows sees the longer
+      # history. Existing dates are never overwritten, so this cannot rewrite a
+      # bar a live run collected -- including a corrected one.
+      - name: Extend market history
+        if: github.event_name == 'workflow_dispatch' && inputs.backfill_history
+        run: python -m scripts.backfill_market_history --db finance_sentiment.db
+
       - name: Run pipeline
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SENTIMENT_BACKEND: llm
         run: python main.py run --no-show
+
+      # Sealing is idempotent by content hash, so a repeat dispatch proves
+      # identity rather than creating a second record. No key is exposed: this
+      # reads stored tables and writes append-only rows.
+      - name: Seal the completed study and redraw the review sample
+        if: github.event_name == 'workflow_dispatch' && inputs.freeze_artifacts
+        run: |
+          python -m scripts.freeze_result --db finance_sentiment.db
+          python -m scripts.event_review_sample --db finance_sentiment.db \
+            --out docs/event_review_sheet.csv
 
       # Readiness only: sessions accumulated, coverage, missingness. This step
       # is structurally incapable of reporting an accuracy -- database.record_
