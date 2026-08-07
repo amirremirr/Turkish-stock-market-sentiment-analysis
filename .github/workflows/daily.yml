@@ -63,6 +63,18 @@ jobs:
           SENTIMENT_BACKEND: llm
         run: python main.py run --no-show
 
+      # Readiness only: sessions accumulated, coverage, missingness. This step
+      # is structurally incapable of reporting an accuracy -- database.record_
+      # future_readiness rejects any report carrying one -- so watching it every
+      # day cannot become optional-stopping on the untouched sample.
+      #
+      # continue-on-error because future validation must never be able to break
+      # ordinary data collection. A missed readiness snapshot costs a row in a
+      # reporting table; a failed run costs a day of headlines.
+      - name: Record untouched-future readiness
+        continue-on-error: true
+        run: python -m scripts.future_readiness --db finance_sentiment.db
+
       # Opt-in, not daily. The protocol is frozen: re-running it every morning
       # would accumulate near-identical studies and invite reading the sequence
       # of verdicts as evidence. It is worth re-running when the corpus has

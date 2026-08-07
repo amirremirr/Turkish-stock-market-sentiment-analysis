@@ -166,30 +166,60 @@ def _events_html(db_path: str) -> str:
         )
 
 
+def _windows_html(db_path: str) -> str:
+    """Build the market-windows fragment, degrading visibly on failure."""
+    try:
+        from dashboard_regime import render_market_windows_section
+
+        return render_market_windows_section(
+            db.read_table("event_return_windows", db_path),
+            db.read_table("event_research_dataset", db_path),
+        )
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("Market-windows section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>Market Windows</h2>'
+            '<p class="null">This section could not be rendered.</p></section>'
+        )
+
+
 def _validation_html(db_path: str) -> str:
-    """Build the walk-forward fragment, degrading visibly on failure."""
+    """Build the predictive-validation fragment, degrading visibly on failure."""
     try:
         from dashboard_regime import render_validation_section
 
-        runs = db.read_table("validation_runs", db_path)
-        if runs.empty:
-            return render_validation_section(runs, None)
-        results = db.read_table("validation_results", db_path)
-        latest = runs.sort_values("validation_run_id").iloc[-1]
         return render_validation_section(
-            runs, results,
-            protocol_hash=str(latest.get("protocol_hash") or ""),
-            geometry=str(
-                (json.loads(latest["counts_json"]) or {}).get("window_name", "")
-                if latest.get("counts_json") else ""
-            ),
+            db.read_table("frozen_research_results", db_path),
+            later_runs=db.read_table("validation_runs", db_path),
         )
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("Validation section unavailable: %s", exc)
         return (
-            '<section class="card"><h2>Walk-Forward Validation</h2>'
+            '<section class="card"><h2>Predictive Validation</h2>'
             '<p class="null">This section could not be rendered.</p></section>'
         )
+
+
+def _future_html(db_path: str) -> str:
+    """Build the future-validation fragment. Readiness only, never performance."""
+    try:
+        from scripts.future_readiness import build_report
+
+        # Computed live and never persisted from here: the dashboard is a
+        # reader of the sealed boundary, not a participant in it.
+        return _render_future(build_report(db_path))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("Future-validation section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>Future Validation Status</h2>'
+            '<p class="null">This section could not be rendered.</p></section>'
+        )
+
+
+def _render_future(readiness) -> str:
+    from dashboard_regime import render_future_validation_section
+
+    return render_future_validation_section(readiness)
 
 
 # -- Rendering helpers -----------------------------------------------------------
@@ -235,7 +265,16 @@ _CAT_LABELS = {
 def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     d = _collect(db_path)
     regime_html = _regime_html(db_path)
-    events_html = _events_html(db_path) + _validation_html(db_path)
+    # The seven-section story, in the order a reader should meet it: what the
+    # data is, what the news looks like, how it is classified, what events were
+    # grouped, which market windows those events can even be measured against,
+    # what the frozen evaluation found, and what remains genuinely untested.
+    events_html = (
+        _events_html(db_path)
+        + _windows_html(db_path)
+        + _validation_html(db_path)
+        + _future_html(db_path)
+    )
 
     # -- Chart data --
     labels   = [r["date"][5:] for r in d["sent"]]              # MM-DD

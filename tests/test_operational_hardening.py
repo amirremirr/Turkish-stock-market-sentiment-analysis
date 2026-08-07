@@ -548,6 +548,26 @@ def test_validation_is_opt_in_and_never_runs_on_a_schedule():
     assert inputs["workflow_dispatch"]["inputs"]["run_validation"]["default"] is False
 
 
+def test_readiness_runs_daily_but_cannot_break_collection():
+    """Future validation must never cost a day of headlines."""
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    step = next(s for s in steps if "readiness" in str(s.get("name", "")).lower())
+    assert step.get("continue-on-error") is True
+    assert "if" not in step, "readiness is recorded on every run, not opt-in"
+    assert "OPENAI_API_KEY" not in str(step.get("env") or {})
+
+
+def test_readiness_step_runs_after_collection():
+    """A readiness snapshot describes the data the run just collected."""
+
+    steps = _workflow("daily.yml")["jobs"]["run"]["steps"]
+    names = [str(s.get("name", "")) for s in steps]
+    pipeline_index = next(i for i, n in enumerate(names) if n == "Run pipeline")
+    readiness = next(i for i, n in enumerate(names) if "readiness" in n.lower())
+    assert pipeline_index < readiness
+
+
 def test_validation_step_cannot_score_or_scrape():
     """It reads stored tables; it must not be handed a scoring credential."""
 

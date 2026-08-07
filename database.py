@@ -641,6 +641,98 @@ CREATE TABLE IF NOT EXISTS validation_predictions (
                  first_reactable_session)
 );
 
+-- A completed study, sealed. Append-only by trigger: a frozen result that can
+-- be updated is not frozen, and "we re-ran it and it worked" must never be
+-- presentable as "it worked".
+CREATE TABLE IF NOT EXISTS frozen_research_results (
+    artifact_hash     TEXT PRIMARY KEY,
+    artifact_version  TEXT NOT NULL,
+    protocol_version  TEXT NOT NULL,
+    protocol_hash     TEXT NOT NULL,
+    code_commit       TEXT,
+    database_snapshot TEXT,
+    validation_run_id INTEGER,
+    verdict           TEXT NOT NULL,
+    conclusion        TEXT NOT NULL,
+    independent_sessions INTEGER,
+    specifications_run   INTEGER,
+    specifications_blocked INTEGER,
+    successes         INTEGER,
+    artifact_json     TEXT NOT NULL,
+    frozen_at         TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_frozen_research_results_no_update
+BEFORE UPDATE ON frozen_research_results
+BEGIN
+    SELECT RAISE(ABORT, 'frozen_research_results is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_frozen_research_results_no_delete
+BEFORE DELETE ON frozen_research_results
+BEGIN
+    SELECT RAISE(ABORT, 'frozen_research_results is append-only');
+END;
+
+-- The untouched future-validation contract. Append-only for the same reason:
+-- a boundary that can move is not a boundary.
+CREATE TABLE IF NOT EXISTS future_validation_definitions (
+    definition_hash   TEXT PRIMARY KEY,
+    version           TEXT NOT NULL,
+    validation_start  TEXT NOT NULL,
+    first_eligible_session TEXT NOT NULL,
+    protocol_hash     TEXT NOT NULL,
+    frozen_artifact_hash TEXT,
+    minimum_sessions  INTEGER NOT NULL,
+    minimum_horizon_days INTEGER NOT NULL,
+    definition_json   TEXT NOT NULL,
+    registered_at     TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_future_validation_definitions_no_update
+BEFORE UPDATE ON future_validation_definitions
+BEGIN
+    SELECT RAISE(ABORT, 'future_validation_definitions is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_future_validation_definitions_no_delete
+BEFORE DELETE ON future_validation_definitions
+BEGIN
+    SELECT RAISE(ABORT, 'future_validation_definitions is append-only');
+END;
+
+-- Readiness snapshots. Data-quality statistics only: no accuracy, no error, no
+-- correlation. Peeking at performance while a sample accumulates and stopping
+-- when it looks good is optional-stopping, and it leaves no trace in the
+-- number it corrupts.
+CREATE TABLE IF NOT EXISTS future_validation_readiness (
+    observed_at       TEXT NOT NULL,
+    definition_hash   TEXT NOT NULL,
+    state             TEXT NOT NULL,
+    untouched_sessions INTEGER NOT NULL,
+    required_sessions  INTEGER NOT NULL,
+    eligible_events    INTEGER NOT NULL,
+    distinct_outcomes  INTEGER NOT NULL,
+    elapsed_days       INTEGER NOT NULL,
+    required_days      INTEGER NOT NULL,
+    family_coverage_json TEXT,
+    missingness_json     TEXT,
+    control_availability_json TEXT,
+    eligible_to_run    INTEGER NOT NULL DEFAULT 0,
+    blocking_reasons   TEXT,
+    PRIMARY KEY (observed_at, definition_hash)
+);
+
+-- Deterministic stratified sample for manual grouping review. Drawn without
+-- any reference to market returns, so a reviewer cannot be nudged by outcome.
+CREATE TABLE IF NOT EXISTS event_review_sample (
+    sample_version    TEXT NOT NULL,
+    stratum           TEXT NOT NULL,
+    group_key         TEXT NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    comparison_group_key TEXT,
+    similarity        REAL,
+    rationale         TEXT,
+    drawn_at          TEXT NOT NULL,
+    PRIMARY KEY (sample_version, stratum, group_key, comparison_group_key)
+);
+
 -- Audit trail: one row per full pipeline run
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -749,6 +841,18 @@ _MIGRATIONS: List[Tuple[str, str, str]] = [
     ("event_research_dataset", "timing_conflict",           "INTEGER NOT NULL DEFAULT 0"),
     ("event_research_dataset", "timing_conflict_reason",    "TEXT"),
     ("event_research_dataset", "is_tradable_window",        "INTEGER NOT NULL DEFAULT 1"),
+    # Which side of the untouched-future boundary an observation falls on. The
+    # two epochs are never pooled silently.
+    ("event_research_dataset", "corpus_epoch", "TEXT"),
+    ("session_modelling_units", "corpus_epoch", "TEXT"),
+    # Market-factor provenance: where a number came from, when it was retrieved
+    # and under which transformation. A backfilled series and a live-collected
+    # one are the same data only if both can say that.
+    ("market_factors", "source",            "TEXT"),
+    ("market_factors", "retrieved_at",      "TEXT"),
+    ("market_factors", "transform_version", "TEXT"),
+    ("bist100_prices", "source",            "TEXT"),
+    ("bist100_prices", "retrieved_at",      "TEXT"),
 ]
 
 
@@ -2076,8 +2180,206 @@ def upsert_event_dataset(rows, db_path: str = DB_PATH) -> int:
         "first_reactable_session", "first_reactable_at",
         "event_information_cutoff", "event_timing_rule_version",
         "timing_conflict", "timing_conflict_reason", "is_tradable_window",
-        "updated_at",
+        "corpus_epoch", "updated_at",
     ], rows, db_path)
+
+
+def freeze_research_result(
+    artifact: Dict[str, Any], db_path: str = DB_PATH,
+) -> Dict[str, Any]:
+    """Seal a completed study. Re-freezing the same artifact is a no-op.
+
+    Returns ``{"artifact_hash": ..., "already_frozen": bool}``. An attempt to
+    store a *different* artifact under an existing hash cannot happen -- the
+    hash is derived from the content -- and an attempt to modify a stored row
+    is refused by trigger.
+    """
+    import json as _json
+
+    from research.frozen_result import artifact_hash as _hash
+
+    digest = artifact.get("artifact_hash") or _hash(artifact)
+    if _hash(artifact) != digest:
+        raise ValueError("artifact hash does not match its content")
+
+    now = _now_iso()
+    version = artifact["study"]["protocol_version"]
+    protocol = artifact["study"]["protocol_hash"]
+    with _conn(db_path) as con:
+        existing = con.execute(
+            "SELECT frozen_at FROM frozen_research_results WHERE artifact_hash = ?",
+            (digest,),
+        ).fetchone()
+        if existing:
+            return {"artifact_hash": digest, "already_frozen": True,
+                    "frozen_at": existing[0]}
+
+        # The hazard this guards: a later run under a revised protocol being
+        # sealed under the *same* version name, so the record silently becomes
+        # the newer, possibly better-looking study. A revised protocol is a new
+        # study and needs a new version string.
+        clash = con.execute(
+            """SELECT protocol_hash FROM frozen_research_results
+                WHERE protocol_version = ? AND protocol_hash <> ?""",
+            (version, protocol),
+        ).fetchone()
+        if clash:
+            raise ValueError(
+                f"{version!r} is already frozen under protocol hash "
+                f"{clash[0][:16]}...; this artifact carries {protocol[:16]}.... "
+                "A revised protocol is a different study and needs its own "
+                "version string."
+            )
+        con.execute(
+            """INSERT INTO frozen_research_results
+               (artifact_hash, artifact_version, protocol_version, protocol_hash,
+                code_commit, database_snapshot, validation_run_id, verdict,
+                conclusion, independent_sessions, specifications_run,
+                specifications_blocked, successes, artifact_json, frozen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                digest, artifact["artifact_version"],
+                artifact["study"]["protocol_version"],
+                artifact["study"]["protocol_hash"],
+                artifact["provenance"].get("code_commit"),
+                artifact["provenance"].get("database_snapshot"),
+                artifact["provenance"].get("validation_run_id"),
+                artifact["verdict"], artifact["conclusion"],
+                (artifact.get("sample") or {}).get("distinct_sessions"),
+                artifact.get("specifications_run"),
+                artifact.get("specifications_blocked"),
+                artifact.get("successes"),
+                _json.dumps(artifact, sort_keys=True, ensure_ascii=False,
+                            default=str),
+                artifact.get("frozen_at") or now,
+            ),
+        )
+    return {"artifact_hash": digest, "already_frozen": False, "frozen_at": now}
+
+
+def list_frozen_results(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Every sealed study, oldest first."""
+    with _conn(db_path) as con:
+        return [
+            dict(row) for row in con.execute(
+                "SELECT * FROM frozen_research_results ORDER BY frozen_at"
+            )
+        ]
+
+
+def register_future_validation(
+    document: Dict[str, Any], db_path: str = DB_PATH,
+) -> Dict[str, Any]:
+    """Register the untouched-future contract. Idempotent by content hash."""
+    import json as _json
+
+    from research.future_validation import definition_hash
+
+    digest = definition_hash(document)
+    now = _now_iso()
+    with _conn(db_path) as con:
+        existing = con.execute(
+            "SELECT registered_at FROM future_validation_definitions "
+            "WHERE definition_hash = ?", (digest,),
+        ).fetchone()
+        if existing:
+            return {"definition_hash": digest, "already_registered": True,
+                    "registered_at": existing[0]}
+        con.execute(
+            """INSERT INTO future_validation_definitions
+               (definition_hash, version, validation_start,
+                first_eligible_session, protocol_hash, frozen_artifact_hash,
+                minimum_sessions, minimum_horizon_days, definition_json,
+                registered_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                digest, document["version"], document["validation_start"],
+                document["first_eligible_session"], document["protocol_hash"],
+                document.get("frozen_retrospective_artifact_hash"),
+                document["sample_size_requirement"]["minimum_sessions"],
+                document["minimum_evaluation_horizon_days"],
+                _json.dumps(document, sort_keys=True, ensure_ascii=False,
+                            default=str),
+                now,
+            ),
+        )
+    return {"definition_hash": digest, "already_registered": False,
+            "registered_at": now}
+
+
+def record_future_readiness(
+    report: Dict[str, Any], db_path: str = DB_PATH,
+) -> int:
+    """Store one readiness snapshot.
+
+    The report carries counts and coverage only. Nothing here accepts an
+    accuracy, an error or a correlation, so a caller cannot use this table to
+    watch performance accumulate.
+    """
+    import json as _json
+
+    forbidden = {
+        "mae", "rmse", "accuracy", "directional_accuracy", "balanced_accuracy",
+        "pearson_r", "correlation", "brier_score", "residual_mean", "verdict",
+        "predicted", "actual",
+    }
+    leaked = forbidden & set(report)
+    if leaked:
+        raise ValueError(
+            f"readiness reports must not carry outcome statistics: {sorted(leaked)}"
+        )
+
+    with _conn(db_path) as con:
+        con.execute(
+            """INSERT OR REPLACE INTO future_validation_readiness
+               (observed_at, definition_hash, state, untouched_sessions,
+                required_sessions, eligible_events, distinct_outcomes,
+                elapsed_days, required_days, family_coverage_json,
+                missingness_json, control_availability_json, eligible_to_run,
+                blocking_reasons)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                report["observed_at"], report["definition_hash"],
+                report["state"], report["untouched_sessions"],
+                report["required_sessions"], report["eligible_events"],
+                report["distinct_outcomes"], report["elapsed_days"],
+                report["required_days"],
+                _json.dumps(report.get("family_coverage") or {}, sort_keys=True),
+                _json.dumps(report.get("missingness") or {}, sort_keys=True),
+                _json.dumps(report.get("control_availability") or {}, sort_keys=True),
+                1 if report.get("eligible_to_run") else 0,
+                ";".join(report.get("blocking_reasons") or []) or None,
+            ),
+        )
+    return 1
+
+
+def replace_event_review_sample(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    sample_version: str,
+    db_path: str = DB_PATH,
+) -> int:
+    """Rebuild the manual-review draw for one sample version."""
+    now = _now_iso()
+    with _conn(db_path) as con:
+        con.execute(
+            "DELETE FROM event_review_sample WHERE sample_version = ?",
+            (sample_version,),
+        )
+        con.executemany(
+            """INSERT OR REPLACE INTO event_review_sample
+               (sample_version, stratum, group_key, algorithm_version,
+                comparison_group_key, similarity, rationale, drawn_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            [
+                (sample_version, row["stratum"], row["group_key"],
+                 row["algorithm_version"], row.get("comparison_group_key"),
+                 row.get("similarity"), row.get("rationale"), now)
+                for row in rows
+            ],
+        )
+    return len(rows)
 
 
 def prune_superseded_event_derivations(
@@ -2130,6 +2432,7 @@ def replace_session_modelling_units(
         "entry_date", "exit_date", "dominant_family", "dominant_timing_bucket",
         "raw_return", "residual_none", "residual_em_lagged",
         "residual_em_oil_fx_lagged", "residual_em_contemporaneous",
+        "corpus_epoch",
     }
     columns = [
         "first_reactable_session", "window_name", "modelling_unit",
@@ -2137,7 +2440,7 @@ def replace_session_modelling_units(
         "entry_date", "exit_date", "dominant_family", "dominant_timing_bucket",
         "raw_return", "residual_none", "residual_em_lagged",
         "residual_em_oil_fx_lagged", "residual_em_contemporaneous",
-        "features_json", "updated_at",
+        "corpus_epoch", "features_json", "updated_at",
     ]
     with _conn(db_path) as con:
         con.execute(
@@ -3332,13 +3635,27 @@ def get_external_series(db_path: str = DB_PATH) -> pd.DataFrame:
 
 
 def upsert_market_factors(rows: Iterable[Dict[str, Any]], db_path: str = DB_PATH) -> int:
-    """Upsert market-factor rows. Each dict: date, symbol, label, close, daily_return."""
-    data = [(r["date"], r["symbol"], r.get("label"), r.get("close"), r.get("daily_return"))
-            for r in rows]
+    """Upsert market-factor rows.
+
+    Each dict: date, symbol, label, close, daily_return, and optionally the
+    provenance triple (source, retrieved_at, transform_version). Provenance is
+    optional so the live collection path stays unchanged, but a backfilled row
+    that omits it is indistinguishable from a collected one, which is why
+    scripts/backfill_market_history.py always supplies it.
+    """
+    now = _now_iso()
+    data = [
+        (r["date"], r["symbol"], r.get("label"), r.get("close"),
+         r.get("daily_return"), r.get("source", "yfinance"),
+         r.get("retrieved_at", now), r.get("transform_version", "live-collection"))
+        for r in rows
+    ]
     with _conn(db_path) as con:
         con.executemany(
             """INSERT OR REPLACE INTO market_factors
-               (date, symbol, label, close, daily_return) VALUES (?, ?, ?, ?, ?)""",
+               (date, symbol, label, close, daily_return, source, retrieved_at,
+                transform_version)
+               VALUES (?,?,?,?,?,?,?,?)""",
             data,
         )
     logger.info("Upserted %d market-factor rows", len(data))
