@@ -170,6 +170,31 @@ MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Fold geometries, frozen. Applicability thresholds are derived in _spec() so a
+# geometry can never be declared to apply at a sample size it cannot fit.
+_GEOMETRIES: Dict[str, Dict[str, Any]] = {
+    "primary": {
+        "initial_train_sessions": 40,
+        "test_sessions": 10,
+        "step_sessions": 10,
+        "minimum_test_sessions_per_fold": 8,
+        "can_declare_success": True,
+    },
+    "reduced": {
+        "initial_train_sessions": 25,
+        "test_sessions": 6,
+        "step_sessions": 6,
+        "minimum_test_sessions_per_fold": 5,
+        "can_declare_success": False,
+        "reason": (
+            "25 training sessions against up to six features is roughly four "
+            "observations per parameter; the design can detect nothing it "
+            "should be believed about, so its verdict is capped at inconclusive"
+        ),
+    },
+}
+
+
 def _spec() -> Dict[str, Any]:
     """The complete frozen specification, as a plain JSON-safe object."""
 
@@ -264,31 +289,27 @@ def _spec() -> Dict[str, Any]:
             # geometry exists so a small sample produces a stated null instead
             # of an empty report -- and it is barred from declaring success.
             "selection_rule": "by session count, before any model is fitted",
+            # Each geometry's applicability threshold is *derived* from its own
+            # parameters, never written down beside them. A hard-coded 50 against
+            # 40 training + 1 embargo + 10 test is a geometry that applies at a
+            # sample size where it cannot produce a single fold -- which is what
+            # it did, on the first production run.
             "geometries": {
-                "primary": {
-                    "applies_when_sessions_at_least": 50,
-                    "initial_train_sessions": 40,
-                    "test_sessions": 10,
-                    "step_sessions": 10,
-                    "minimum_test_sessions_per_fold": 8,
-                    "can_declare_success": True,
-                },
-                "reduced": {
-                    "applies_when_sessions_at_least": 31,
-                    "initial_train_sessions": 25,
-                    "test_sessions": 6,
-                    "step_sessions": 6,
-                    "minimum_test_sessions_per_fold": 5,
-                    "can_declare_success": False,
-                    "reason": (
-                        "25 training sessions against up to six features is "
-                        "roughly four observations per parameter; the design "
-                        "can detect nothing it should be believed about, so "
-                        "its verdict is capped at inconclusive"
+                name: {
+                    **geometry,
+                    "applies_when_sessions_at_least": (
+                        geometry["initial_train_sessions"]
+                        + DEFAULT_EMBARGO_SESSIONS
+                        + geometry["test_sessions"]
                     ),
-                },
+                }
+                for name, geometry in _GEOMETRIES.items()
             },
-            "below_minimum_sessions": 31,
+            "below_minimum_sessions": (
+                _GEOMETRIES["reduced"]["initial_train_sessions"]
+                + DEFAULT_EMBARGO_SESSIONS
+                + _GEOMETRIES["reduced"]["test_sessions"]
+            ),
             "below_minimum_action": "report insufficient_sample for everything",
             "embargo_sessions": DEFAULT_EMBARGO_SESSIONS,
             "embargo_rationale": (

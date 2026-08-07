@@ -74,9 +74,17 @@ Two geometries, both frozen, selected by **session count alone**:
 
 | Geometry | Applies when | Train | Test | Step | Can declare success |
 |---|---|---|---|---|---|
-| `primary` | ≥ 50 sessions | 40 | 10 | 10 | yes |
-| `reduced` | 31–49 sessions | 25 | 6 | 6 | **no** |
-| none | < 31 sessions | — | — | — | everything `insufficient_sample` |
+| `primary` | ≥ 51 sessions | 40 | 10 | 10 | yes |
+| `reduced` | 32–50 sessions | 25 | 6 | 6 | **no** |
+| none | < 32 sessions | — | — | — | everything `insufficient_sample` |
+
+Each threshold is **derived** from its own geometry —
+`initial_train + embargo + test` — never written down beside it. The first
+production run selected `primary` at exactly 50 sessions against a hand-written
+threshold of 50, then blocked all 72 specifications because that geometry needs
+51. A geometry declared to apply where it cannot produce a single fold is
+internally inconsistent regardless of any result, so the threshold is now
+computed and a test fits every geometry at its own boundary.
 
 Sample size is a property of data collection, knowable and known before any
 target was read, so indexing the geometry on it is not selecting on a result.

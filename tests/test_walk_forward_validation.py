@@ -328,6 +328,46 @@ class TestProtocolFreeze:
         assert select_geometry(49)["name"] == "reduced"
         assert select_geometry(10)["name"] == "none"
 
+    def test_every_geometry_can_fit_at_its_own_threshold(self):
+        """A geometry that applies where it cannot fit is a broken geometry.
+
+        The first production run selected `primary` at exactly 50 sessions and
+        then blocked all 72 specifications, because 40 training + 1 embargo +
+        10 test needs 51. Thresholds are now derived, and this pins it.
+        """
+
+        from research.protocol import _spec
+
+        specification = _spec()
+        for name, geometry in specification["folds"]["geometries"].items():
+            threshold = geometry["applies_when_sessions_at_least"]
+            sessions = [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}"
+                        for i in range(threshold)]
+            folds = build_folds(
+                sessions,
+                initial_train=geometry["initial_train_sessions"],
+                test_size=geometry["test_sessions"],
+                step=geometry["step_sessions"],
+                embargo=specification["folds"]["embargo_sessions"],
+            )
+            assert folds, f"{name} applies at {threshold} but produces no fold"
+            first = folds[0]
+            assert len(first.train) >= geometry["initial_train_sessions"] - (
+                specification["folds"]["embargo_sessions"]
+            )
+            assert len(first.test) >= geometry["minimum_test_sessions_per_fold"]
+
+    def test_geometry_thresholds_are_not_hand_written(self):
+        from research.protocol import _spec
+
+        specification = _spec()
+        embargo = specification["folds"]["embargo_sessions"]
+        for geometry in specification["folds"]["geometries"].values():
+            assert geometry["applies_when_sessions_at_least"] == (
+                geometry["initial_train_sessions"] + embargo
+                + geometry["test_sessions"]
+            )
+
     def test_reduced_geometry_cannot_declare_success(self):
         assert select_geometry(49)["can_declare_success"] is False
         assert select_geometry(80)["can_declare_success"] is True
