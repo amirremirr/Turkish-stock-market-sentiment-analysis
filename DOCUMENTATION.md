@@ -343,8 +343,37 @@ price fields used. During-session and unknown-time events are blocked with a
 stated reason and retained for descriptive work. Control sets separate tradable
 lagged inputs from contemporaneous descriptive ones, and residuals come from a
 rolling prior window. The result is `event_research_dataset`, one row per event
-and window, ready for a later walk-forward stage. Full detail in
-[docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+and window. Full detail in [docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+
+### Timing semantics
+
+`signal_date` is the **first trading session able to react** to a publication,
+not the session it was published in. This is proven against production records
+by `scripts/timing_audit.py` rather than assumed, and it is the single
+definition every window, feature and target now reads from
+(`research/timing.py`). Proving it uncovered a defect that had shifted every
+post-close and weekend return window one session late; the windows were rebuilt
+and the raw observations were untouched. See [docs/TIMING.md](docs/TIMING.md).
+
+### Walk-forward validation
+
+`research/protocol.py` freezes a predictive protocol — target, sample, feature
+sets, models, folds, embargo, metrics, missing-value policy, thresholds and
+success criteria — and hashes it, so a later run that reports a different hash
+is a different study. `scripts/run_validation.py` executes it and stores every
+out-of-sample prediction, so a reported metric can be recomputed rather than
+trusted.
+
+The statistical unit is the **session**, not the event: candidate events
+reacting on the same session share one index return, and counting them
+separately would shrink every interval without adding an observation. A
+specification with too few complete observations is refused by a sample-size
+gate and recorded as `insufficient_sample` with its binding requirement, rather
+than fitted and quoted.
+
+Results are labelled **retrospective walk-forward exploration**, not an
+untouched future test. The current result is null. See
+[docs/PREDICTIVE_PROTOCOL.md](docs/PREDICTIVE_PROTOCOL.md).
 
 ### Run status and unscored headlines
 

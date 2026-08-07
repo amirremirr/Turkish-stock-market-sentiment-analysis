@@ -162,8 +162,33 @@ only; separated tradable and contemporaneous control sets with rolling
 prior-window residuals; explicit blocked states for intraday, consensus and KAP
 data; and a versioned event-level research dataset.
 
-No predictive model, trading strategy or frozen research protocol exists. See
-[docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+See [docs/EVENT_MODEL.md](docs/EVENT_MODEL.md).
+
+## Timing audit and walk-forward validation - completed
+
+Completed 2026-08-07.
+
+**The timing convention was proven, not assumed.** `signal_date` means the first
+trading session able to react, established against 3 893 production records:
+hypothesis "publication session" is refuted by 607 of 607 discriminating rows.
+See [docs/TIMING.md](docs/TIMING.md).
+
+**Two defects were found and corrected.** Every `post_close` and
+`weekend_or_holiday` return window was built one session late, because the
+builder treated the already-shifted `signal_date` as a publication date. And a
+candidate event's timing combined the *earliest* member's session with the *most
+restrictive* member's bucket. Both are fixed; the derived tables were rebuilt.
+No score, label, detailed category or experiment identity changed.
+
+**A frozen protocol now exists** — target, sample, features, models, folds,
+metrics, thresholds and success criteria fixed and hashed before comparative
+results were read, with the statistical unit set to the session rather than the
+event. See [docs/PREDICTIVE_PROTOCOL.md](docs/PREDICTIVE_PROTOCOL.md).
+
+**The result is null.** Under the frozen protocol no news feature set beat its
+baselines by the pre-specified margins on any target. The sample is small enough
+that most specifications were refused outright by the sample-size gate. No
+trading strategy exists and no transaction-cost evaluation has been performed.
 
 ## Approved decisions - implemented in Phase A
 

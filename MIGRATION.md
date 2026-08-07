@@ -176,3 +176,22 @@ The checked-in local database extends through 2026-07-07. The latest known `orig
 - BIST ticker/entity master: supports Phase 6.
 - EM, oil, FX context: collected; supports Phase 7.
 - Dependence-aware polarization inference and the API-key-free demo are complete; verified shared-event coverage still depends on later event-resolution phases.
+
+## Timing correction and walk-forward tables (2026-08-07)
+
+Additive columns on `event_groups`, `event_return_windows` and
+`event_research_dataset` carrying explicit event timing (`first_reactable_session`,
+`first_reactable_at`, `event_information_cutoff`, `event_timing_rule_version`,
+`governing_headline_id`, `timing_conflict`, `timing_conflict_reason`,
+`member_session_count`, `is_tradable`/`is_tradable_window`), plus five new tables:
+`session_modelling_units`, `validation_protocols`, `validation_runs`,
+`validation_results`, `validation_predictions`.
+
+`event_return_windows` and `event_research_dataset` rows written under the
+superseded `return-windows-v1` / `event-research-dataset-v1` versions are
+**deleted** on the next events run. These are derived tables — every row is
+rebuilt from headlines and price bars — and the v1 rows are not merely stale but
+known to be one session late, so a query filtering by group key alone would
+otherwise return the wrong number. Raw observations, scores, labels, detailed
+categories, experiment identities and the append-only audit tables are out of
+scope and unchanged.

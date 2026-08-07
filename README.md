@@ -35,7 +35,8 @@ For the active LLM backend, the model returns sentiment direction and model-repo
 | Current automation | GitHub Actions on weekdays at 06:30 UTC (09:30 Istanbul); the SQLite snapshot is persisted on the `data` branch |
 | Sample snapshots | Local checked-in DB: 2026-03-12 through 2026-07-07; latest known `origin/data` snapshot: 2026-07-31. Counts are intentionally omitted because the automated snapshot continues to change |
 | Last methodology update | 2026-08-01 (processing integrity, session variants/alignment, polarization inference, and public demo); scorer prompt `p3` last changed 2026-06-13 |
-| Predictive status | Exploratory and currently unvalidated; no validated alpha, out-of-sample strategy, or profitable trading claim |
+| Predictive status | Evaluated out-of-sample under a frozen, hashed protocol (`docs/PREDICTIVE_PROTOCOL.md`) and **null**: no news feature set beat its baselines by the pre-specified margins. Labelled retrospective walk-forward exploration, not an untouched future test. No strategy and no transaction-cost evaluation |
+| Timing convention | `signal_date` is the first trading session able to react, proven against 3 893 production records (`docs/TIMING.md`), not assumed from tests |
 | Event-level migration | Headline aggregation remains primary; event dual-write is enabled, phases 0-2 are built, KAP ingestion is disabled pending production access, and later event-centric phases are pending |
 
 The schema changes are additive. Initializing an existing database adds and backfills metadata where possible; it does not silently re-score headlines, recompute aggregates, or regenerate dated findings and figures. Derived signal tables change only when aggregation is explicitly run, including through commands such as `run`, `aggregate`, `clean`, `restore-exclusion`, or LLM recategorization that deliberately invoke it.

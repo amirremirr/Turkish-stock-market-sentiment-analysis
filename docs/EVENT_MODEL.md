@@ -3,8 +3,10 @@
 A versioned event-level research dataset connecting auditable news groups to
 timing-safe subsequent market outcomes.
 
-**No predictive model, trading strategy or frozen research protocol exists yet.**
-This package builds the dataset those would later consume.
+A frozen walk-forward protocol now consumes this dataset — see
+[PREDICTIVE_PROTOCOL.md](PREDICTIVE_PROTOCOL.md). **No trading strategy exists,
+and no relationship has been validated.** Timing semantics are defined once, in
+[TIMING.md](TIMING.md).
 
 ## Candidate events, not verified events
 
@@ -73,18 +75,37 @@ db.record_event_group_action(group_key, "split", "analyst",
 
 A return is only a valid target if someone could have earned it.
 
-| Timing | Window | Entry → exit | Cutoff |
-|---|---|---|---|
-| `pre_open` | `same_session_open_to_close` | open → close, same session | that session's open |
-| `post_close` | `close_to_next_open` | close → next open | that session's close |
-| `post_close` | `next_open_to_next_close` | next open → next close | that session's close |
-| `post_close` | `close_to_next_close` | close → next close | that session's close |
-| `during_session` | — | **blocked** | no intraday data |
-| unknown | — | **blocked** | publication time unknown |
+`signal_date` is the **first session able to react**, never the publication
+session. [TIMING.md](TIMING.md) proves this from production records and
+documents the v1 defect it uncovered: every post-close and weekend window was
+built one session late.
 
-Each row records its `information_cutoff`, `assumed_execution`, and the exact
-`entry_price_field` / `exit_price_field` used, so the assumption behind any
-number is readable rather than implied.
+With `D` the first reactable session and `P` the session before it:
+
+| Window | Entry → exit | Tradable | Applies to |
+|---|---|---|---|
+| `reactable_open_to_close` | open(D) → close(D) | **yes** | `pre_open`, `post_close`, `weekend_or_holiday` |
+| `prior_close_to_reactable_open` | close(P) → open(D) | no | same |
+| `prior_close_to_reactable_close` | close(P) → close(D) | no | same |
+| — | — | **blocked** | `during_session`: no intraday data |
+| — | — | **blocked** | `unknown`: publication time unknown |
+
+The gap windows are not tradable in any bucket: entering at close(P) means
+holding a position before the news was public. They are kept because that is
+where a pre-open story's reaction actually lands, and labelled for what they
+are — a measurement of reaction rather than an achievable return.
+
+Each row records its `information_cutoff`, `assumed_execution`, `is_tradable`
+and the exact `entry_price_field` / `exit_price_field` used, so the assumption
+behind any number is readable rather than implied.
+
+### Event-level timing
+
+An event is not fully known until its **last** member is published, so
+`first_reactable_session` is the latest member `signal_date`, and the timing
+bucket is read from that same member — never combined across two. Groups whose
+members straddle sessions carry `timing_conflict = 1`, are excluded from primary
+evaluation, and stay available descriptively.
 
 **Only `complete` and `corrected` price bars are visible to the window builder.**
 A provisional bar is an intraday snapshot; using one would reintroduce exactly
@@ -136,7 +157,17 @@ here.**
 | `event_group_audit` | append-only manual review actions |
 | `event_return_windows` | per-group windows with full timing provenance |
 | `control_residual_returns` | residuals per session, window and control set |
-| `event_research_dataset` | one row per (event, window), ready for walk-forward |
+| `event_research_dataset` | one row per (event, window) |
+| `session_modelling_units` | one row per (reactable session, window) — the frozen statistical unit |
+
+### Why the modelling unit is the session
+
+Every candidate event reacting on the same session is scored against the *same*
+index return. On the current corpus 731 event rows carry only 49 distinct
+outcomes. Counting them as independent would shrink every interval by roughly
+√14.9 without adding a single observation, so
+[PREDICTIVE_PROTOCOL.md](PREDICTIVE_PROTOCOL.md) models sessions and keeps the
+event-level rows as a declared sensitivity.
 
 ## Blocked data
 
@@ -156,5 +187,7 @@ reads as an oversight while a stated reason reads as a limitation:
 - Dispersion measures disagreement among covering outlets, not market
   uncertainty.
 - No grouping has been human-reviewed; all are `unreviewed` by default.
-- Nothing here has been evaluated out-of-sample, and no predictive relationship
-  is claimed.
+- The dataset has now been evaluated out-of-sample under a frozen protocol, and
+  **no predictive relationship survived**. See
+  [PREDICTIVE_PROTOCOL.md](PREDICTIVE_PROTOCOL.md) for the result and the sample
+  sizes behind it.

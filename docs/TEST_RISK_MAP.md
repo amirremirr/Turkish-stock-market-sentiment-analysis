@@ -124,19 +124,44 @@ This map reports behavioral evidence, not a test-count badge. "Covered" means de
 | Similarity evidence is lost | **Covered** | `::test_similarity_evidence_is_retained` requires a score, rule and algorithm version on every mapping. | None for the tested path. |
 | A group of one outlet is read as corroboration | **Covered** | `::test_single_source_group_is_flagged` and `::test_summary_reports_cross_source_dispersion_only_with_two_voices` require NULL dispersion for one voice. | None for the tested path. |
 | Manual review silently rewrites the algorithm's output | **Covered** | `::test_manual_split_and_merge_are_appended_not_applied`, `::test_event_group_audit_is_append_only` and `::test_regrouping_preserves_manual_audit_history`. | None for the tested path. |
-| A return is used that could not have been earned | **Covered** | `::test_pre_open_uses_same_session_open_to_close`, `::test_post_close_cannot_act_before_the_next_open`, `::test_during_session_is_blocked_for_want_of_intraday_data` and a parametrized eligibility table. | Windows assume fills at the open or close; slippage and impact are a later phase's concern. |
+| A return is used that could not have been earned | **Covered** | `::test_pre_open_uses_same_session_open_to_close`, `::test_post_close_trades_the_session_that_can_react`, `::test_during_session_is_blocked_for_want_of_intraday_data` and a parametrized eligibility table. | Windows assume fills at the open or close; slippage and impact are a later phase's concern. |
 | A provisional bar enters a return | **Covered** | `::test_provisional_bars_are_never_used` proves settled-only visibility. | None for the tested path. |
 | A contemporaneous control is used as if tradable | **Covered** | `::test_control_sets_declare_tradability` and `::test_control_panel_materialises_lagged_values` separate the two kinds and pin the lag. | The schema labels the distinction; enforcement at the point of use belongs to the future protocol. |
 | Residuals leak the future through a full-sample beta | **Covered** | `::test_residuals_use_a_rolling_prior_window_only` requires the estimation window to end strictly before the described date and NULL below the minimum. | Rolling windows are short at current coverage, so most lagged residuals are NULL. |
 | A brief overstates what a group is | **Covered** | `::test_brief_never_claims_a_verified_event` requires candidate wording and forbids recommendation language outside disclaimers. | Lexical checks cannot detect an unsupported inference in new words. |
 | The event step breaks the run | **Covered** | `::test_events_step_fails_soft` injects a failure and requires existing tables to survive. | Fail-soft covers exceptions inside the step. |
 
+## Timing and walk-forward validation risks (2026-08-07)
+
+`tests/test_timing_audit.py` (29 tests) and
+`tests/test_walk_forward_validation.py` (34 tests). Every risk below is one
+whose realisation would *improve* the reported numbers rather than raise an
+error, so none of them can be caught by ordinary operation.
+
+| Risk | Status | Evidence | Residual gap |
+|---|---|---|---|
+| `signal_date` is silently reinterpreted | **Covered** | `TestSignalDateSemantics` derives both hypotheses from the calendar and requires production-shaped rows to refute one. `::test_classifier_would_report_hypothesis_a_if_rows_said_so` proves the verdict is read off the data rather than hard-coded. | The audit reads stored rows; a future ingest that writes a different convention is caught only on the next audit run. |
+| Post-close and weekend windows drift a session again | **Covered** | `::test_post_close_is_not_shifted_by_a_session` pins entry and exit to explicit dates, and `::test_audit_flags_a_shifted_window` injects a deliberately shifted builder and requires a FAIL. | Pinned to the daily-bar model; intraday windows would need their own pins. |
+| A gap window is presented as tradable | **Covered** | `::test_gap_windows_are_never_tradable` across all three buckets. | The flag is enforced in `eligible_rows`; a direct SQL consumer can still ignore it. |
+| An event's bucket and session come from different headlines | **Covered** | `::test_bucket_and_session_come_from_the_same_member` and `::test_last_member_governs_not_the_earliest`. | None for the tested path. |
+| Events straddling sessions enter evaluation | **Covered** | `::test_members_spanning_sessions_are_flagged` and `::test_conflicted_events_are_blocked_from_primary_evaluation`. | Conflicted groups stay queryable descriptively by design. |
+| Duplicated outcomes are counted as independent | **Covered** | `::test_duplicated_outcomes_are_reported_not_hidden` and `::test_conflicting_outcomes_on_one_session_are_an_error`. | Session-level rows still carry serial dependence across adjacent sessions; the embargo bounds it but does not remove it. |
+| A test fold leaks into training | **Covered** | `TestFolds` pins chronology, disjointness and the embargo; `::test_a_sufficient_sample_actually_fits` re-checks every prediction against **its own** fold. | Expanding windows deliberately train on earlier test sessions; that is the design, not a leak. |
+| Preprocessing is fitted on the test fold | **Covered** | `::test_standardiser_uses_only_the_training_fold` and `::test_transform_does_not_recentre_the_test_fold`. | Only the standardiser is checked; any future preprocessing step needs its own test. |
+| A random split appears | **Covered** | `::test_no_random_splitting_anywhere_in_the_module` scans the module source for `train_test_split`, `shuffle`, `random.sample`, `rng.permutation`. | A source scan cannot catch a differently named helper. |
+| A contemporaneous control reaches a tradable model | **Covered** | `::test_contemporaneous_controls_are_never_tradable` and `::test_no_feature_set_contains_a_contemporaneous_input`. | None for the tested path. |
+| An underpowered specification is fitted and quoted | **Covered** | `::test_gate_refuses_and_names_the_binding_requirement` and `::test_blocked_specification_is_not_fitted`. | The gate governs the runner; a caller invoking the estimator directly bypasses it. |
+| The frozen protocol moves silently | **Covered** | `::test_hash_is_stable_across_calls` and `::test_hash_ignores_provenance_but_covers_the_specification`. | The hash proves the specification is unchanged, not that it was well chosen. |
+| A small sample declares success | **Covered** | `::test_reduced_geometry_cannot_declare_success`. | None for the tested path. |
+| Uncertainty ignores repeated sessions | **Covered** | `::test_cluster_bootstrap_resamples_clusters_not_rows` and `::test_bootstrap_is_deterministic`. | A cluster bootstrap handles cross-sectional dependence, not serial dependence. |
+
 ## Risks intentionally remaining
 
 | Risk | Current evidence | Required next work |
 |---|---|---|
 | Live-provider integration | Mocked unit tests cover contracts, not continuing provider compatibility. | Small monitored integration checks that do not make the deterministic suite network-dependent. |
-| Out-of-sample predictive validity | No current test or report establishes it. | Pre-register a target/variant, use chronological walk-forward windows, controls, costs, and independent evaluation periods. |
+| Out-of-sample predictive validity | Established as **null** under a frozen protocol on 49 sessions, with most specifications refused by the sample-size gate. | More sessions. The binding constraint is data, not method: the protocol is fixed and rerunning it on a longer corpus requires no new decisions. |
+| Serial dependence between adjacent sessions | The one-session embargo bounds story overlap; the cluster bootstrap does not model autocorrelation. | A block bootstrap or HAC standard errors once the sample supports estimating the dependence. |
 
 ## Maintenance rule
 
