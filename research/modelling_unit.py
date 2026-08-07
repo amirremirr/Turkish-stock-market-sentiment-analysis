@@ -288,6 +288,11 @@ def build_session_units(
         unit["dominant_timing_bucket"] = (
             max(sorted(buckets), key=lambda k: buckets[k]) if buckets else None
         )
+        # Carried onto the unit so a modelling caller cannot mix the sealed
+        # untouched sample into a retrospective fit without noticing.
+        from research.future_validation import corpus_epoch
+
+        unit["corpus_epoch"] = corpus_epoch(session)
         units.append(unit)
     return units
 

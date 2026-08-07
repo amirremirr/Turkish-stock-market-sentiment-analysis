@@ -20,11 +20,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from research.controls import CONTROL_SETS, compute_residual_returns
 from research.return_windows import (
     BLOCKED, PRIMARY_WINDOW, PriceSeries, build_return_windows,
-    timing_eligibility,
+    market_return_series, timing_eligibility,
 )
+from research.future_validation import corpus_epoch
 from research.timing import TIMING_RULE_VERSION
 
-DATASET_VERSION = "event-research-dataset-v2"
+DATASET_VERSION = "event-research-dataset-v3"
 
 # Data the project does not have. Recorded on every row so downstream work
 # cannot mistake absence for irrelevance.
@@ -90,11 +91,18 @@ def build_event_dataset(
                 row["raw_return"]
             )
 
+    # Betas are fitted on the whole settled price history, not only on sessions
+    # that happened to carry an event. The window return is a property of the
+    # index, so the event dates were never the natural estimation sample -- and
+    # on this corpus they were the binding constraint on residual coverage.
+    estimation = market_return_series(prices)
+
     for window_name, series in sorted(by_window.items()):
         observations = sorted(series.items())
         for control_set_id in CONTROL_SETS:
             residuals = compute_residual_returns(
                 observations, panel, control_set_id,
+                estimation_series=estimation.get(window_name),
             )
             for exit_date, result in residuals.items():
                 record = {
@@ -130,6 +138,10 @@ def build_event_dataset(
                 "timing_conflict": 1 if conflict else 0,
                 "timing_conflict_reason": event.get("timing_conflict_reason"),
                 "is_tradable_window": row["is_tradable"],
+                # Which side of the untouched-future boundary this row falls on.
+                # Stamped at build time so the two corpora can never be pooled
+                # by a query that simply forgot to filter.
+                "corpus_epoch": corpus_epoch(_reactable_session(event)),
                 "signal_family": event.get("signal_family"),
                 "event_type": event.get("event_type"),
                 "primary_entity": event.get("primary_entity"),

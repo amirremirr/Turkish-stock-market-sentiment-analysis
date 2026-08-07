@@ -29,10 +29,15 @@ inputs; choosing among them is a later phase's job under a frozen protocol.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-CONTROL_SET_VERSION = "control-sets-v1"
+# v2: rolling betas are estimated on the full settled price history rather
+# than only on sessions that carried an event. Same estimator, same 60/30
+# rule, same strictly-prior window -- more of the history it always meant
+# to use. The control definitions themselves are unchanged.
+CONTROL_SET_VERSION = "control-sets-v2"
 
 KIND_TRADABLE = "tradable"
 KIND_CONTEMPORANEOUS = "contemporaneous_descriptive"
@@ -191,6 +196,7 @@ def compute_residual_returns(
     *,
     estimation_window: int = DEFAULT_ESTIMATION_WINDOW,
     min_observations: int = DEFAULT_MIN_OBSERVATIONS,
+    estimation_series: Optional[Sequence[Tuple[str, float]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Residual returns from a rolling **prior-window** control model.
 
@@ -198,6 +204,14 @@ def compute_residual_returns(
     sessions and applied to that date only. The date being described never
     contributes to its own coefficients; below ``min_observations`` the residual
     is NULL rather than estimated from too little history.
+
+    ``estimation_series`` supplies the history the betas are fitted on, which is
+    not the same thing as the dates residuals are wanted for. The window return
+    is a property of the index, defined on every settled session, while
+    residuals are only needed where an event landed. Fitting on the event dates
+    alone discarded most of the price history and was the binding constraint on
+    coverage. Only observations strictly **before** each described date are ever
+    used, so a wider estimation series adds history without adding look-ahead.
     """
 
     definition = CONTROL_SETS.get(control_set_id)
@@ -206,6 +220,9 @@ def compute_residual_returns(
     names = list(definition["controls"])
 
     ordered = sorted(market_returns)
+    history_series = sorted(
+        estimation_series if estimation_series is not None else market_returns
+    )
     results: Dict[str, Dict[str, Any]] = {}
 
     if not names:
@@ -224,8 +241,13 @@ def compute_residual_returns(
             }
         return results
 
-    for index, (date, value) in enumerate(ordered):
-        history = ordered[max(0, index - estimation_window):index]
+    for date, value in ordered:
+        # Strictly prior observations from the estimation series. Bisecting on
+        # the date rather than indexing into `ordered` keeps the two series
+        # independent, so the history is the same whether or not this date is
+        # itself an event date.
+        cut = bisect_left([day for day, _ in history_series], date)
+        history = history_series[max(0, cut - estimation_window):cut]
         rows = [
             (day, ret) for day, ret in history
             if all(panel.get(day, {}).get(name) is not None for name in names)

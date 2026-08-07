@@ -308,6 +308,50 @@ def build_return_windows(
     return windows
 
 
+def market_return_series(
+    prices: PriceSeries,
+) -> Dict[str, List[tuple]]:
+    """Each window's return computed over the **whole** settled price history.
+
+    The windows are definitions of an index return, not properties of an event:
+    ``reactable_open_to_close`` on session D is the index open-to-close return
+    on D whether or not any news happened to land there.
+
+    That distinction matters for the rolling control model. Estimating a beta
+    only on sessions that carried an event throws away most of the price
+    history for no reason, and on this corpus it was the binding constraint --
+    the estimator needs 30 prior observations, and the event series barely has
+    forty. Estimating on the full series uses the same quantity, measured the
+    same way, over every session it exists for.
+
+    Uses only settled bars, so a provisional snapshot cannot enter a beta.
+    """
+
+    series: Dict[str, List[tuple]] = {name: [] for name in ALL_WINDOWS}
+    dates = prices.dates
+    for day in dates:
+        bar = prices.get(day)
+        open_price = _finite(bar.get("open"))
+        close_price = _finite(bar.get("close"))
+
+        same_session = _percent(close_price, open_price)
+        if same_session is not None:
+            series[WINDOW_REACTABLE_OPEN_CLOSE].append((day, same_session))
+
+        prior_day = previous_session(day)
+        prior = prices.get(prior_day)
+        if prior is None:
+            continue
+        prior_close = _finite(prior.get("close"))
+        gap = _percent(open_price, prior_close)
+        if gap is not None:
+            series[WINDOW_PRIOR_CLOSE_TO_OPEN].append((day, gap))
+        full = _percent(close_price, prior_close)
+        if full is not None:
+            series[WINDOW_PRIOR_CLOSE_TO_CLOSE].append((day, full))
+    return series
+
+
 def timing_eligibility(
     timing_bucket: Optional[str],
     *,
