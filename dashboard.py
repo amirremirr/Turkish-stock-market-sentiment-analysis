@@ -216,6 +216,42 @@ def _future_html(db_path: str) -> str:
         )
 
 
+def _overview_html(db_path: str, runs, overall_tone=None) -> str:
+    """Build the Overview fragment, degrading visibly on failure.
+
+    Reuses the same regime report the News & Events section renders, so the two
+    can never disagree about today's numbers.
+    """
+    try:
+        from dashboard_regime import render_overview_section
+        from indicators.regime import build_regime_report
+
+        family_signals = db.read_table("daily_family_signals", db_path)
+        if family_signals.empty:
+            return render_overview_section({})
+
+        regime = build_regime_report(
+            family_signals,
+            db.read_table("abnormal_tone_daily", db_path),
+            db.read_table("news_disagreement_daily", db_path),
+            db.read_table("news_volume_daily", db_path),
+            db.get_classified_headlines(db_path=db_path),
+        )
+        status = str(runs[0]["status"]) if runs else ""
+        return render_overview_section(
+            regime,
+            overall_tone=overall_tone,
+            frozen=db.read_table("frozen_research_results", db_path),
+            run_status=status,
+        )
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("Overview section unavailable: %s", exc)
+        return (
+            '<section class="card"><h2>Overview</h2>'
+            '<p class="null">This section could not be rendered.</p></section>'
+        )
+
+
 def _render_future(readiness) -> str:
     from dashboard_regime import render_future_validation_section
 
@@ -265,13 +301,12 @@ _CAT_LABELS = {
 def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
     d = _collect(db_path)
     regime_html = _regime_html(db_path)
-    # The seven-section story, in the order a reader should meet it: what the
-    # data is, what the news looks like, how it is classified, what events were
-    # grouped, which market windows those events can even be measured against,
-    # what the frozen evaluation found, and what remains genuinely untested.
-    events_html = (
-        _events_html(db_path)
-        + _windows_html(db_path)
+    # Four navigation groups, reusing the existing sections. News & Events
+    # carries the descriptive layer; Research carries everything a reader has to
+    # opt into. Nothing is deleted -- only reordered and de-emphasised.
+    events_only_html = _events_html(db_path)
+    research_html = (
+        _windows_html(db_path)
         + _validation_html(db_path)
         + _future_html(db_path)
     )
@@ -302,6 +337,12 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         )
     else:
         latest_html = '<div class="big">No data yet</div>'
+
+    # The overall tone shown on Overview is the published session aggregate,
+    # taken from the same record the chart plots -- not recomputed.
+    overview_html = _overview_html(
+        db_path, d["runs"], latest["avg_score"] if latest else None,
+    )
 
     # -- Progress card --
     pct = min(100, round(100 * d["reliable"] / MINIMUM_OVERLAP_DAYS))
@@ -349,9 +390,11 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         "__BARCOLS__":     json.dumps(barcols),
         "__CAT_LABELS__":  json.dumps(cat_labels, ensure_ascii=False),
         "__CAT_COUNTS__":  json.dumps(cat_counts),
+        "__OVERVIEW__":    overview_html,
         "__REGIME__":      regime_html,
         "__REGIME_CSS__":  REGIME_CSS + EVENT_CSS,
-        "__EVENTS__":      events_html,
+        "__EVENTS_ONLY__": events_only_html,
+        "__RESEARCH__":    research_html,
     }.items():
         html = html.replace(key, val)
 
@@ -418,39 +461,20 @@ __REGIME_CSS__
   <div class="meta">Reads Turkish financial news every weekday, measures the mood, and compares it
   with the Istanbul stock exchange. Updated: __GENERATED__</div>
 
-  <div class="note"><b>Research project</b> — production prompt p3 reached 83.3% categorical
-  agreement with this project's held-out human-label rubric. Market-return analysis remains
-  exploratory and is not a validated strategy. Nothing here is investment advice.</div>
+  <p class="status-line">Research project &middot; descriptive analysis &middot;
+  no validated trading signal &middot; not investment advice
+  <a href="#methodology-note">methodology</a></p>
 
   <nav class="toc">
+    <a href="#overview">Overview</a>
+    <a href="#news-events">News &amp; Events</a>
+    <a href="#research">Research</a>
     <a href="#data-health">Data Health</a>
-    <a href="#news-regime">News Regime</a>
-    <a href="#signal-families">Signal Families</a>
-    <a href="#candidate-events">Candidate Events</a>
-    <a href="#windows">Market Windows</a>
-    <a href="#validation">Predictive Validation</a>
-    <a href="#future">Future Validation</a>
   </nav>
 
-  <h2 id="data-health">Data Health</h2>
-  <div class="grid">
-    <div class="card">
-      <h3>Latest session-aligned news mood</h3>
-      __LATEST__
-    </div>
-    <div class="card">
-      <h3>Headlines analysed</h3>
-      <div class="big">__TOTAL__</div>
-      <div class="sub">from __SOURCES__ Turkish news sources<br>__FIRST_DAY__ &rarr; __LAST_DAY__</div>
-    </div>
-    <div class="card">
-      <h3>Exploratory reporting observations</h3>
-      <div class="big">__RELIABLE__ / __NEEDED__ observations</div>
-      <div class="bar-outer"><div class="bar-inner" style="width:__PCT__%"></div></div>
-      <div class="sub">eligible news-and-market observations; __NEEDED__ is a display gate, not validation</div>
-    </div>
-  </div>
+  __OVERVIEW__
 
+  <h2 class="group" id="news-events">News &amp; Events</h2>
   <div class="card chart-card">
     <h3>Session-aligned unweighted news mood vs. stock market (last 60 sessions)</h3>
     <div class="sub" style="margin-bottom:10px">Bars are the unweighted baseline assigned to
@@ -470,9 +494,6 @@ __REGIME_CSS__
     <div class="card">
       <h3>What the news is about</h3>
       <canvas id="catChart"></canvas>
-      <h3 style="margin-top:18px">Recent daily runs</h3>
-      <div style="margin-top:6px">__DOTS__</div>
-      <div class="sub">one dot per pipeline run &mdash; hover for details</div>
     </div>
   </div>
 
@@ -517,7 +538,53 @@ new Chart(document.getElementById('catChart'), {
 });
 </script>
 __REGIME__
-__EVENTS__
+__EVENTS_ONLY__
+
+  <h2 class="group" id="research">Research</h2>
+__RESEARCH__
+
+  <h2 class="group" id="data-health">Data Health</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Latest session-aligned news mood</h3>
+      __LATEST__
+    </div>
+    <div class="card">
+      <h3>Headlines analysed</h3>
+      <div class="big">__TOTAL__</div>
+      <div class="sub">from __SOURCES__ Turkish news sources<br>__FIRST_DAY__ &rarr; __LAST_DAY__</div>
+    </div>
+    <div class="card">
+      <h3>Exploratory reporting observations</h3>
+      <div class="big">__RELIABLE__ / __NEEDED__ observations</div>
+      <div class="bar-outer"><div class="bar-inner" style="width:__PCT__%"></div></div>
+      <div class="sub">eligible news-and-market observations; __NEEDED__ is a display gate, not validation</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Recent daily runs</h3>
+    <div style="margin-top:6px">__DOTS__</div>
+    <div class="sub">one dot per pipeline run &mdash; hover for details.
+    <b>Data partially complete</b> means collection and scoring succeeded while
+    at least one market input is still provisional: the morning run fires before
+    the market opens, so the current session's price bar has not settled yet.</div>
+  </div>
+
+  <details class="expander page-note" id="methodology-note">
+    <summary>Methodology and research status</summary>
+    <p>Production prompt <code>p3</code> reached 83.3% categorical agreement
+    with this project's held-out human-label rubric, against 68.5% for the
+    prior prompt and 61.5% for always answering "neutral". Headlines are scored
+    for whether they are bullish or bearish <em>for Turkish equities</em>,
+    which is often the opposite of whether the news is good.</p>
+    <p>Every measure on this page is descriptive. Market-return analysis is
+    exploratory: one completed study, frozen and immutable, found no news
+    approach that beat its baselines by pre-specified margins, and an untouched
+    future test is still accumulating data. <strong>Nothing here is a validated
+    strategy, a recommendation, or investment advice.</strong></p>
+    <p>For the LLM backend the stored positive/neutral/negative components are
+    synthetic compatibility fields, not calibrated probabilities.</p>
+  </details>
 </body>
 </html>
 """

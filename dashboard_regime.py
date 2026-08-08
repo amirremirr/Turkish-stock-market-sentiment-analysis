@@ -47,6 +47,79 @@ SUFFICIENCY_LABELS = {
     "insufficient": "Insufficient",
 }
 
+# Database identifiers are unchanged everywhere; these are display strings only.
+# A reader should not have to know that `prior_close_to_reactable_close` means
+# "yesterday's close to today's close" in order to read a table.
+WINDOW_LABELS = {
+    "reactable_open_to_close": "Open to close, first session that could react",
+    "prior_close_to_reactable_open": "Overnight gap (previous close to open)",
+    "prior_close_to_reactable_close": "Previous close to close",
+}
+
+CONTROL_LABELS = {
+    "raw_return": "Raw return (no adjustment)",
+    "residual_none": "Raw return (no adjustment)",
+    "residual_em_lagged": "Adjusted for emerging markets",
+    "residual_em_oil_fx_lagged": "Adjusted for emerging markets, oil and FX",
+    "residual_em_contemporaneous": "Adjusted for same-day emerging markets",
+}
+
+BLOCKED_REASON_LABELS = {
+    "intraday_prices_unavailable": "Published during trading hours (no intraday prices)",
+    "publication_time_unknown": "Publication time unknown",
+    "market_recap_excluded_by_default": "Market recap (tone follows the return)",
+    "no_complete_price_bar": "No settled price bar",
+    "no_prior_session_price_bar": "No settled bar for the previous session",
+    "no_following_complete_session": "No following settled session",
+    "event_members_span_incompatible_sessions": "Headlines react on different sessions",
+}
+
+FEATURE_SET_LABELS = {
+    "none": "Unconditional mean",
+    "previous_direction": "Yesterday's direction",
+    "ar1": "Yesterday's return",
+    "headline_count_only": "Headline count only",
+    "net_tone_share": "Positive minus negative share",
+    "market_controls_only": "Market factors only",
+    "family_signals": "Topic tone",
+    "abnormal_tone": "Unusual tone vs history",
+    "disagreement": "Outlet disagreement",
+    "attention_shock": "Attention and breadth",
+    "event_tone_novelty": "Event tone and novelty",
+    "controls_plus_news": "Market factors plus news",
+}
+
+MODEL_LABELS = {
+    "mean": "Training average",
+    "majority": "Majority direction",
+    "ridge": "Ridge regression",
+    "logistic": "Logistic regression",
+}
+
+
+def label(mapping: Dict[str, str], key: Any) -> str:
+    """Human-readable name, falling back to the identifier itself."""
+
+    text = "" if key is None else str(key)
+    return mapping.get(text, text)
+
+
+def tone_state(value: Any) -> tuple:
+    """(word, css class) for a tone level. Never colour alone."""
+
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "no reading", "state-null"
+    number = float(value)
+    if number > 0.15:
+        return "clearly positive", "state-pos"
+    if number > 0.05:
+        return "mildly positive", "state-pos"
+    if number < -0.15:
+        return "clearly negative", "state-neg"
+    if number < -0.05:
+        return "mildly negative", "state-neg"
+    return "broadly neutral", "state-flat"
+
 
 def _num(value: Any, digits: int = 3, *, signed: bool = False) -> str:
     """Format a number, or say plainly that there isn't one."""
@@ -72,20 +145,239 @@ def _pct(value: Any) -> str:
 
 
 def _tone_label(value: Any) -> str:
-    """A word for the tone, so meaning never rests on colour alone."""
+    """A word for the tone, so meaning never rests on colour alone.
 
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return "no reading"
-    number = float(value)
-    if number > 0.05:
-        return "positive"
-    if number < -0.05:
-        return "negative"
-    return "neutral"
+    Delegates to :func:`tone_state` so the thresholds exist in one place; two
+    copies would eventually disagree about what counts as positive.
+    """
+
+    return tone_state(value)[0]
 
 
 def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
+
+
+def render_overview_section(
+    regime: Dict[str, Any],
+    *,
+    overall_tone: Any = None,
+    frozen=None,
+    run_status: str = "",
+) -> str:
+    """The 20-second read: mood, what is driving it, and whether anything is proven.
+
+    Everything here already exists elsewhere on the page. The point of this
+    section is ordering and restraint: six numbers a person can actually hold in
+    their head, then the headlines behind them, then the one sentence about
+    predictive status. Detail lives further down, not here.
+    """
+
+    if not regime or regime.get("status") != "ok":
+        return (
+            '<section class="card" id="overview"><h2>Overview</h2>'
+            '<p class="null">No indicators are stored yet. Run the pipeline to '
+            'populate them.</p></section>'
+        )
+
+    families = {f["signal_family"]: f for f in regime.get("families", [])}
+    composite = regime.get("domestic_only")
+
+    # The canonical overall aggregate, passed in from daily_signal_variants --
+    # the same number the chart and the "latest mood" card use. Deriving a
+    # second overall here from the family means would create a competing
+    # definition that can silently disagree with the published one, which is
+    # exactly what this module exists not to do.
+    overall = overall_tone
+    domestic = composite["level"]["simple_mean"] if composite else None
+
+    def _tone_tile(title: str, value, note: str) -> str:
+        word, css = tone_state(value)
+        return f"""
+    <div class="tile">
+      <div class="tile-k">{_esc(title)}</div>
+      <div class="tile-v {css}">{_num(value, 2, signed=True)}</div>
+      <div class="tile-state {css}">{_esc(word)}</div>
+      <div class="tile-note">{note}</div>
+    </div>"""
+
+    def _family_tile(title: str, key, note: str) -> str:
+        family = families.get(key)
+        if family is None:
+            # The ranking is deliberately empty rather than filled from a
+            # one-headline topic. Say which, instead of printing a bare n/a:
+            # "not enough news yet" is a fact a reader can act on, and it is
+            # the common state early in a session.
+            thin = sorted(
+                (f for k, f in families.items()
+                 if k not in ("__domestic__", "market_recap")
+                 and f["level"]["simple_mean"] is not None),
+                key=lambda f: -f["level"]["headline_count"],
+            )
+            detail = (
+                f"best covered so far: "
+                f"{FAMILY_LABELS.get(thin[0]['signal_family'], thin[0]['signal_family'])} "
+                f"({thin[0]['level']['headline_count']} headlines)"
+                if thin else "no economic topic has headlines yet"
+            )
+            return f"""
+    <div class="tile">
+      <div class="tile-k">{_esc(title)}</div>
+      <div class="tile-v state-null">Not enough news yet</div>
+      <div class="tile-note">no economic topic reached a sufficient sample this
+      session &mdash; {_esc(detail)}</div>
+    </div>"""
+        level = family["level"]["simple_mean"]
+        word, css = tone_state(level)
+        return f"""
+    <div class="tile">
+      <div class="tile-k">{_esc(title)}</div>
+      <div class="tile-v">{_esc(FAMILY_LABELS.get(key, key))}</div>
+      <div class="tile-state {css}">{_num(level, 2, signed=True)} &middot; {_esc(word)}</div>
+      <div class="tile-note">{note}</div>
+    </div>"""
+
+    elevated_volume = regime.get("elevated_volume") or []
+    elevated_disagreement = regime.get("elevated_disagreement") or []
+
+    volume_state = (
+        f"Busier than usual in {len(elevated_volume)} topic"
+        f"{'s' if len(elevated_volume) != 1 else ''}"
+        if elevated_volume else "Normal news volume"
+    )
+    volume_detail = (
+        ", ".join(FAMILY_LABELS.get(f, f) for f in elevated_volume[:3])
+        if elevated_volume else "no topic is unusually busy today"
+    )
+    disagreement_state = (
+        f"Outlets disagree in {len(elevated_disagreement)} topic"
+        f"{'s' if len(elevated_disagreement) != 1 else ''}"
+        if elevated_disagreement else "Outlets broadly agree"
+    )
+    disagreement_detail = (
+        ", ".join(FAMILY_LABELS.get(f, f) for f in elevated_disagreement[:3])
+        if elevated_disagreement else "no unusual spread between outlets"
+    )
+
+    recap_share = regime.get("market_recap_share")
+    recap_note = (
+        f"{_pct(recap_share)} of today's headlines were market recap &mdash; "
+        f"reporting that restates the day's index move. Recap is excluded from "
+        f"the topic ranking above because its tone follows the return rather "
+        f"than describing news."
+        if recap_share is not None else
+        "Market-recap share could not be computed for this session."
+    )
+
+    drivers_html = _driver_lists(
+        regime.get("top_positive_drivers") or [],
+        regime.get("top_negative_drivers") or [],
+    )
+
+    verdict_line = (
+        "No validated predictive signal. The one completed study found none, "
+        "and an untouched future test is still accumulating data."
+    )
+    if frozen is not None and not getattr(frozen, "empty", True):
+        record = frozen.sort_values("frozen_at").iloc[0]
+        verdict_line = (
+            f"<strong>No validated predictive signal.</strong> The completed "
+            f"study tested "
+            f"{int(record.get('specifications_run') or 0)} specifications over "
+            f"{int(record.get('independent_sessions') or 0)} independent "
+            f"sessions and found "
+            f"{int(record.get('successes') or 0)} that met its criteria."
+        )
+
+    health = _health_line(run_status)
+
+    return f"""
+<section class="card" id="overview">
+  <h2>Overview</h2>
+  <p class="sub lede">Turkish financial-news mood for
+  <strong>{_esc(regime['as_of'])}</strong>, the first market session able to
+  react to it.</p>
+
+  <div class="tiles">
+    {_tone_tile("Overall news tone", overall,
+                "the published session aggregate, all topics included")}
+    {_tone_tile("Domestic-only tone", domestic,
+                "excludes global risk and market recap")}
+    {_family_tile("Most positive topic", regime.get("most_positive"),
+                  "economic topics only")}
+    {_family_tile("Most negative topic", regime.get("most_negative"),
+                  "economic topics only")}
+    <div class="tile">
+      <div class="tile-k">News volume</div>
+      <div class="tile-v">{_esc(volume_state)}</div>
+      <div class="tile-note">{_esc(volume_detail)}</div>
+    </div>
+    <div class="tile">
+      <div class="tile-k">Outlet disagreement</div>
+      <div class="tile-v">{_esc(disagreement_state)}</div>
+      <div class="tile-note">{_esc(disagreement_detail)}</div>
+    </div>
+  </div>
+
+  <p class="sub recap-note">{recap_note}</p>
+
+  <h3 class="sub-head">What's driving today?</h3>
+  {drivers_html}
+
+  <div class="status-strip">
+    <div><span class="strip-k">Predictive status</span> {verdict_line}</div>
+    <div><span class="strip-k">Data status</span> {health}</div>
+  </div>
+</section>
+"""
+
+
+def _driver_lists(positive, negative) -> str:
+    """Top positive and negative headlines, from the stored driver rows."""
+
+    if not positive and not negative:
+        return '<p class="null">No scored headlines for this session yet.</p>'
+
+    def _column(title: str, rows, css: str) -> str:
+        if not rows:
+            return (f'<div class="driver-col"><h4 class="{css}">{title}</h4>'
+                    f'<p class="null">none</p></div>')
+        items = "".join(f"""
+      <li>
+        <span class="driver-score {css}">{_num(r.get("sentiment_score"), 2, signed=True)}</span>
+        <span class="driver-title">{_esc(r.get("title"))}</span>
+        <span class="driver-meta">{_esc(r.get("source"))} &middot;
+        {_esc(FAMILY_LABELS.get(r.get("signal_family"), r.get("signal_family")))}</span>
+      </li>""" for r in rows[:4])
+        return (f'<div class="driver-col"><h4 class="{css}">{title}</h4>'
+                f'<ul class="drivers">{items}</ul></div>')
+
+    return f"""
+  <div class="driver-grid">
+    {_column("Most positive", positive, "state-pos")}
+    {_column("Most negative", negative, "state-neg")}
+  </div>"""
+
+
+def _health_line(run_status: str) -> str:
+    """Plain-language pipeline state.
+
+    "degraded" is accurate and tells a non-technical reader nothing. What it
+    almost always means here is that today's price bar has not settled yet,
+    which is a normal morning condition rather than a fault.
+    """
+
+    status = (run_status or "").strip().lower()
+    if status == "success":
+        return "All sources collected and settled."
+    if status == "degraded":
+        return ("<strong>Data partially complete.</strong> Collection and "
+                "scoring succeeded; at least one market input is still "
+                "provisional or unavailable. Details under Data Health.")
+    if status == "failed":
+        return ("<strong>Last run failed.</strong> Figures may be stale. "
+                "Details under Data Health.")
+    return "No completed run recorded yet."
 
 
 def render_regime_section(
@@ -109,57 +401,64 @@ def render_regime_section(
 
     header = f"""
 <section class="card" id="news-regime">
-  <h2>News Regime</h2>
-  <p class="sub">
-    Descriptive indicators for {_esc(regime['as_of'])} across
-    {len(families)} signal families &middot; {regime.get('sessions_available', 0)}
-    sessions available.
-    <strong>These are descriptive measures, not trading signals.</strong>
-    No result here is a validated predictive relationship.
-  </p>
-  <p class="sub versions">
-    taxonomy <code>{_esc(family_version)}</code> &middot;
-    experiment <code>{_esc(experiment_id)}</code> &middot;
-    report <code>{_esc(regime.get('version', ''))}</code>
-  </p>
+  <h2>Signal Families</h2>
+  <p class="sub">Tone by topic for {_esc(regime['as_of'])} &mdash;
+  {len(families)} topics over {regime.get('sessions_available', 0)} sessions.
+  Descriptive measures, not trading signals.</p>
 """
 
-    summary_items = [
-        ("Most positive family", FAMILY_LABELS.get(
-            regime.get("most_positive"), regime.get("most_positive")) or "n/a"),
-        ("Most negative family", FAMILY_LABELS.get(
-            regime.get("most_negative"), regime.get("most_negative")) or "n/a"),
-        ("Largest 5-session move", FAMILY_LABELS.get(
-            regime.get("largest_5_session_move"),
-            regime.get("largest_5_session_move")) or "n/a"),
-        ("Unusual vs own history", ", ".join(
-            FAMILY_LABELS.get(f, f) for f in regime.get("unusual_percentiles", [])
-        ) or "none"),
-        ("Elevated disagreement", ", ".join(
-            FAMILY_LABELS.get(f, f) for f in regime.get("elevated_disagreement", [])
-        ) or "none"),
-        ("Elevated volume", ", ".join(
-            FAMILY_LABELS.get(f, f) for f in regime.get("elevated_volume", [])
-        ) or "none"),
-    ]
-    summary = '<div class="regime-summary">' + "".join(
-        f'<div class="regime-kv"><span class="k">{_esc(k)}</span>'
-        f'<span class="v">{_esc(v)}</span></div>'
-        for k, v in summary_items
-    ) + "</div>"
+    # The compact view: one row per topic, four columns a person can read.
+    # Everything else moved under Advanced metrics rather than being deleted.
+    compact_rows = []
+    for family in families:
+        key = family["signal_family"]
+        if key == "__domestic__":
+            continue
+        level = family["level"]["simple_mean"]
+        word, css = tone_state(level)
+        flags = []
+        if family["abnormal"]["is_unusual"]:
+            flags.append("unusual vs history")
+        if family["attention"]["is_elevated"]:
+            flags.append("busier than usual")
+        if (family["disagreement"]["cross_outlet_std"] is not None
+                and family["disagreement"]["cross_outlet_std"] >= 0.30):
+            flags.append("outlets disagree")
+        sufficiency = family["sample_sufficiency"]
+        if sufficiency != "sufficient":
+            flags.append(SUFFICIENCY_LABELS.get(sufficiency, sufficiency).lower())
+        compact_rows.append(f"""
+    <tr class="{'insufficient' if sufficiency != 'sufficient' else ''}">
+      <td class="fam">{_esc(FAMILY_LABELS.get(key, key))}</td>
+      <td class="{css}">{_num(level, 2, signed=True)}
+          <span class="tag">{_esc(word)}</span></td>
+      <td>{family['level']['headline_count']}</td>
+      <td class="flags">{_esc(", ".join(flags)) or "&mdash;"}</td>
+    </tr>""")
+
+    compact = f"""
+  <div class="table-scroll">
+  <table class="regime compact">
+    <thead><tr>
+      <th>Topic</th><th>Tone</th><th>Headlines</th><th>Notes</th>
+    </tr></thead>
+    <tbody>{''.join(compact_rows)}</tbody>
+  </table>
+  </div>
+"""
 
     if composite:
         level = composite["level"]["simple_mean"]
+        word, css = tone_state(level)
         composite_html = f"""
   <div class="composite">
     <strong>Domestic-only composite</strong>
-    &middot; tone {_num(level, signed=True)} ({_tone_label(level)})
+    &middot; tone <span class="{css}">{_num(level, 2, signed=True)} ({_esc(word)})</span>
     &middot; {composite['level']['headline_count']} headlines
     from {composite['level']['source_count']} sources
     &middot; sample {SUFFICIENCY_LABELS.get(composite['sample_sufficiency'],
                                             composite['sample_sufficiency'])}
-    <span class="note">Excludes global risk and market recap. The overall
-    signal-variant series is published separately and is unchanged.</span>
+    <span class="note">Excludes global risk and market recap.</span>
   </div>
 """
     else:
@@ -197,6 +496,8 @@ def render_regime_section(
     </tr>""")
 
     table = f"""
+  <details class="expander">
+    <summary>Advanced metrics &mdash; full family table</summary>
   <div class="table-scroll">
   <table class="regime">
     <thead><tr>
@@ -219,11 +520,34 @@ def render_regime_section(
     <em>n/a</em> means the value could not be defensibly calculated, most often
     because too little history or too few independent sources were available.
   </p>
+  </details>
+
+  <details class="expander">
+    <summary>Methodology and technical details</summary>
+    <p class="sub">Tone is the unweighted mean sentiment of the headlines
+    assigned to each topic on the first market session able to react to them.
+    Abnormal tone is measured against a <em>prior-only</em> rolling window, so
+    no reading uses its own future. Disagreement requires at least three
+    independent outlets; below that it is reported as <em>n/a</em> rather than
+    as a fabricated zero.</p>
+    <p class="sub">These are descriptive measures. No result here is a
+    validated predictive relationship, and none is a trading signal.</p>
+    <p class="sub versions">
+      taxonomy <code>{_esc(family_version)}</code> &middot;
+      experiment <code>{_esc(experiment_id)}</code> &middot;
+      report <code>{_esc(regime.get('version', ''))}</code>
+    </p>
+  </details>
 """
 
-    return header + summary + composite_html + table + _render_drivers(
-        regime, drivers
-    ) + "</section>"
+    drivers_detail = f"""
+  <details class="expander">
+    <summary>Headline-level detail for this session</summary>
+    {_render_drivers(regime, drivers)}
+  </details>
+"""
+
+    return header + compact + composite_html + table + drivers_detail + "</section>"
 
 
 def _render_drivers(regime: Dict[str, Any], drivers: pd.DataFrame) -> str:
@@ -281,12 +605,6 @@ def _render_drivers(regime: Dict[str, Any], drivers: pd.DataFrame) -> str:
 
 REGIME_CSS = """
 #news-regime .versions code { background:#eef2f7; padding:1px 5px; border-radius:3px; }
-.regime-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:8px; margin:12px 0; }
-.regime-kv { background:#f7f9fc; border:1px solid #e3e9f0; border-radius:6px; padding:8px 10px; }
-.regime-kv .k { display:block; font-size:11px; text-transform:uppercase;
-  letter-spacing:.4px; color:#5a6b7d; }
-.regime-kv .v { display:block; font-size:14px; font-weight:600; color:#1b2b3a; }
 .composite { background:#f2f7ff; border:1px solid #d6e4f7; border-radius:6px;
   padding:10px 12px; margin:10px 0; font-size:13px; }
 .composite .note { display:block; color:#5a6b7d; font-size:11px; margin-top:4px; }
@@ -403,10 +721,93 @@ def render_event_section(
 
 
 EVENT_CSS = """
-.toc { margin:14px 0 22px; display:flex; flex-wrap:wrap; gap:8px; }
-.toc a { font-size:12px; padding:5px 11px; border-radius:14px; text-decoration:none;
-         background:#eef2f7; color:#3b4c5e; border:1px solid #dbe3ec; }
+/* Navigation: four groups, not fourteen sections. */
+.toc { margin:18px 0 30px; display:flex; flex-wrap:wrap; gap:10px; }
+.toc a { font-size:13px; font-weight:600; padding:8px 16px; border-radius:18px;
+         text-decoration:none; background:#eef2f7; color:#31465c;
+         border:1px solid #dbe3ec; }
 .toc a:hover { background:#dbe3ec; }
+
+/* Typography hierarchy: group > section > card > label. Each step is a clear
+   size and weight change, so scanning does not depend on reading. */
+h2.group { font-size:13px; letter-spacing:.10em; text-transform:uppercase;
+           color:#7a8899; font-weight:700; margin:52px 0 14px;
+           padding-bottom:9px; border-bottom:2px solid #e6ebf1; }
+.card h2 { font-size:21px; margin:0 0 6px; letter-spacing:-.01em; }
+.sub-head { font-size:15px; font-weight:700; color:#31465c;
+            margin:26px 0 12px; }
+.lede { font-size:15px; color:#4a5a6b; margin-bottom:22px; }
+.status-line { font-size:12.5px; color:#7a8899; margin:2px 0 22px; }
+.status-line a { color:#5a7391; }
+
+/* Tiles: the six numbers a reader should get in ten seconds. */
+.tiles { display:grid; gap:14px; margin:6px 0 4px;
+         grid-template-columns:repeat(auto-fit, minmax(215px, 1fr)); }
+.tile { background:#fbfcfd; border:1px solid #e6ebf1; border-radius:10px;
+        padding:16px 18px; }
+.tile-k { font-size:11.5px; text-transform:uppercase; letter-spacing:.06em;
+          color:#8494a5; font-weight:700; margin-bottom:9px; }
+.tile-v { font-size:23px; font-weight:700; color:#22303f; line-height:1.25;
+          letter-spacing:-.01em; }
+.tile-state { font-size:13px; font-weight:600; margin-top:5px; }
+.tile-note { font-size:11.5px; color:#8494a5; margin-top:8px; line-height:1.5; }
+
+/* State is always a word plus a colour, never a colour alone. */
+.state-pos  { color:#1e7a3c; }
+.state-neg  { color:#a3282b; }
+.state-flat { color:#5a6c7e; }
+.state-null { color:#98a4b3; }
+
+.recap-note { font-size:12.5px; color:#7a8899; margin:16px 0 4px;
+              padding-left:12px; border-left:3px solid #e6ebf1; }
+
+/* What's driving today */
+.driver-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); }
+.driver-col h4 { font-size:12px; text-transform:uppercase; letter-spacing:.05em;
+                 margin:0 0 10px; }
+ul.drivers { list-style:none; margin:0; padding:0; }
+ul.drivers li { padding:9px 0; border-bottom:1px solid #f0f3f7;
+                display:grid; grid-template-columns:52px 1fr; gap:4px 12px; }
+ul.drivers li:last-child { border-bottom:none; }
+.driver-score { font-weight:700; font-size:13.5px; grid-row:span 2; }
+.driver-title { font-size:13.5px; color:#2b3a48; line-height:1.45; }
+.driver-meta { font-size:11.5px; color:#8494a5; }
+
+.status-strip { margin-top:26px; padding-top:18px; border-top:1px solid #e6ebf1;
+                display:grid; gap:9px; font-size:13px; color:#4a5a6b;
+                line-height:1.55; }
+.strip-k { display:inline-block; min-width:128px; font-weight:700;
+           color:#8494a5; font-size:11.5px; text-transform:uppercase;
+           letter-spacing:.05em; }
+
+/* The result, stated once and plainly. */
+.verdict-banner { background:#f6f8fa; border:1px solid #e0e6ed;
+                  border-left:4px solid #8494a5; border-radius:8px;
+                  padding:18px 20px; margin:4px 0 22px; }
+.verdict-headline { font-size:18px; font-weight:700; color:#31465c; }
+.verdict-sub { font-size:13px; color:#5a6c7e; margin-top:7px; line-height:1.6; }
+.interpretation { font-size:13.5px; color:#4a5a6b; line-height:1.65;
+                  margin:20px 0 4px; }
+
+/* Expanders keep detail available without giving it equal weight. */
+details.expander { margin:20px 0 0; border-top:1px solid #e6ebf1;
+                   padding-top:14px; }
+details.expander > summary { cursor:pointer; font-size:12.5px; font-weight:600;
+                             color:#5a7391; list-style:none; padding:5px 0; }
+details.expander > summary::-webkit-details-marker { display:none; }
+details.expander > summary::before { content:"\\25B8  "; color:#98a4b3; }
+details.expander[open] > summary::before { content:"\\25BE  "; }
+details.expander > summary:hover { color:#31465c; }
+details.page-note { margin:34px 0 0; }
+details.page-note p { font-size:12.5px; color:#6b7a8b; line-height:1.65; }
+
+table.regime.compact td { padding:9px 12px; }
+table.regime.compact .flags { color:#8494a5; font-size:12px; }
+
+@media (max-width: 720px) {
+  .tiles { grid-template-columns:1fr; }
+  .strip-k { display:block; min-width:0; }
+}
 .suff-unreviewed { background:#eef2f7; color:#3b4c5e; }
 .suff-confirmed { background:#e6f4ea; color:#1e4620; }
 .suff-rejected { background:#f3e6e6; color:#6b1e1e; }
@@ -443,7 +844,8 @@ def render_market_windows_section(windows, dataset) -> str:
         .groupby("eligibility_reason").size().sort_values(ascending=False)
     )
     blocked_rows = "".join(
-        f"<tr><td><code>{_esc(reason)}</code></td><td>{int(count)}</td></tr>"
+        f"<tr><td>{_esc(label(BLOCKED_REASON_LABELS, reason))}</td>"
+        f"<td>{int(count)}</td></tr>"
         for reason, count in blocked.items()
     )
 
@@ -453,7 +855,7 @@ def render_market_windows_section(windows, dataset) -> str:
             ["window_name", "is_tradable"]
         ).size()
         window_rows = "".join(
-            f"<tr><td><code>{_esc(name)}</code></td>"
+            f"<tr><td>{_esc(label(WINDOW_LABELS, name))}</td>"
             f"<td>{'yes' if tradable else 'no'}</td><td>{int(count)}</td></tr>"
             for (name, tradable), count in summary.items()
         )
@@ -465,7 +867,7 @@ def render_market_windows_section(windows, dataset) -> str:
         if column in eligible
     }
     residual_rows = "".join(
-        f"<tr><td><code>{_esc(name)}</code></td><td>{count}</td></tr>"
+        f"<tr><td>{_esc(label(CONTROL_LABELS, name))}</td><td>{count}</td></tr>"
         for name, count in residuals.items()
     )
 
@@ -557,9 +959,9 @@ def render_validation_section(frozen, *, later_runs=None) -> str:
 
     rows = "".join(f"""
     <tr>
-      <td>{_esc(r["feature_set"])}</td>
-      <td>{_esc(r["model"])}</td>
-      <td><code>{_esc(r["target"])}</code></td>
+      <td>{_esc(label(FEATURE_SET_LABELS, r["feature_set"]))}</td>
+      <td>{_esc(label(MODEL_LABELS, r["model"]))}</td>
+      <td>{_esc(label(CONTROL_LABELS, r["target"]))}</td>
       <td>{_esc(r["kind"])}</td>
       <td>{int(r.get("fitted_folds") or 0)}</td>
       <td>{_num(r.get("mae"), 3)}</td>
@@ -570,25 +972,29 @@ def render_validation_section(frozen, *, later_runs=None) -> str:
            if r.get("hit_rate_ci_lower") is not None else "n/a"}</td>
     </tr>""" for r in sorted(fitted, key=lambda r: r["mae"])[:20])
 
-    def _card(title: str, row, label: str) -> str:
+    def _tile(title: str, row, features, models) -> str:
         if row is None:
-            return (f'<div class="card"><h3>{title}</h3>'
-                    f'<div class="null">n/a</div></div>')
+            return (f'<div class="tile"><div class="tile-k">{title}</div>'
+                    f'<div class="tile-v null">n/a</div></div>')
         return f"""
-    <div class="card">
-      <h3>{title}</h3>
-      <div class="big">{_num(row.get("mae"), 3)}</div>
-      <div class="sub">MAE &middot; {_esc(row["feature_set"])} /
-      {_esc(row["model"])}<br>direction
-      {_num(row.get("directional_accuracy"), 3)} &middot; {label}</div>
+    <div class="tile">
+      <div class="tile-k">{title}</div>
+      <div class="tile-v">{_esc(label(features, row["feature_set"]))}</div>
+      <div class="tile-note">{_esc(label(models, row["model"]))} &middot;
+      average error {_num(row.get("mae"), 2)} &middot; direction
+      {_pct(row.get("directional_accuracy"))}</div>
     </div>"""
 
-    interval_note = "n/a"
+    interval_note = "indistinguishable from chance"
     if best_news is not None and best_news.get("hit_rate_ci_lower") is not None:
+        lower = best_news.get("hit_rate_ci_lower")
+        upper = best_news.get("hit_rate_ci_upper")
+        spans_chance = lower is not None and upper is not None and lower <= 0.5 <= upper
         interval_note = (
-            f"95% CI [{_num(best_news.get('hit_rate_ci_lower'), 3)}, "
-            f"{_num(best_news.get('hit_rate_ci_upper'), 3)}] &mdash; spans 0.5, "
-            f"so its direction is indistinguishable from chance"
+            f"right {_pct(best_news.get('directional_accuracy'))} of the time, "
+            f"with a 95% range of {_pct(lower)}&ndash;{_pct(upper)} &mdash; "
+            + ("wide enough to include a coin flip"
+               if spans_chance else "narrow enough to exclude a coin flip")
         )
 
     later = ""
@@ -607,72 +1013,79 @@ def render_validation_section(frozen, *, later_runs=None) -> str:
 <section class="card" id="validation">
   <h2>Predictive Validation</h2>
 
-  <div class="note verdict-failure">
-    <b>Result: no validated trading signal.</b>
-    {_esc(artifact.get("conclusion", ""))}
+  <div class="verdict-banner">
+    <div class="verdict-headline">No validated predictive signal</div>
+    <div class="verdict-sub">{_esc(artifact.get("conclusion", ""))}</div>
   </div>
 
-  <p class="sub">
-    <strong>Retrospective, and a small sample.</strong> Folds run forward in
-    time and no training fold postdates its test fold, but this corpus was
-    already collected and already inspected when the protocol was written, and
-    it contains <strong>{int(sample.get("distinct_sessions") or 0)} independent
-    sessions</strong>. An untouched test needs data that did not exist yet
-    &mdash; see Future Validation below.
-  </p>
-
-  <div class="grid">
-    <div class="card">
-      <h3>Independent sessions</h3>
-      <div class="big">{int(sample.get("distinct_sessions") or 0)}</div>
-      <div class="sub">{int(sample.get("event_rows") or 0)} event rows collapse
-      to this many outcomes &mdash; events sharing a reaction session share one
-      index return</div>
+  <div class="tiles">
+    <div class="tile">
+      <div class="tile-k">Independent sessions tested</div>
+      <div class="tile-v">{int(sample.get("distinct_sessions") or 0)}</div>
+      <div class="tile-note">a small sample &mdash; many news items share one
+      trading session, and one session is one outcome</div>
     </div>
-    <div class="card">
-      <h3>Successful news specifications</h3>
-      <div class="big">{int(artifact.get("successes") or 0)}</div>
-      <div class="sub">of {int(artifact.get("specifications_run") or 0)} fitted;
-      {blocked_count} more refused by the sample-size gate</div>
+    <div class="tile">
+      <div class="tile-k">News approaches that worked</div>
+      <div class="tile-v">{int(artifact.get("successes") or 0)}</div>
+      <div class="tile-note">of {int(artifact.get("specifications_run") or 0)}
+      tested; {blocked_count} more had too little data to try</div>
     </div>
-    {_card("Best baseline", best_baseline, "no news information")}
-    {_card("Best news model", best_news, "did not clear the margins")}
+    {_tile("Best news approach", best_news, FEATURE_SET_LABELS, MODEL_LABELS)}
+    {_tile("Best comparison baseline", best_baseline, FEATURE_SET_LABELS,
+           MODEL_LABELS)}
   </div>
 
-  <p class="sub versions">
-    protocol <code>{_esc(str(record["protocol_hash"])[:16])}</code> &middot;
-    frozen artifact <code>{_esc(str(record["artifact_hash"])[:16])}</code>
-    &middot; commit <code>{_esc(str(record["code_commit"] or "")[:12])}</code>
-    &middot; verdict
-    <span class="suff verdict-{_esc(record["verdict"])}">{_esc(record["verdict"])}</span>
-    &middot; frozen {_esc(str(record["frozen_at"])[:10])}
+  <p class="interpretation">
+    <strong>How to read this.</strong> The best news approach did not beat a
+    baseline that uses no news at all by enough to be believed, and its
+    direction was {interval_note}. That is not proof that news is
+    uninformative &mdash; with this few sessions the study had little chance of
+    detecting a modest effect. It does mean nothing here has earned the word
+    <em>validated</em>.
   </p>
-  <p class="sub">Uncertainty on the best news model: {interval_note}.</p>
 
-  <div class="table-scroll">
-  <table class="regime">
-    <thead><tr>
-      <th>Feature set</th><th>Model</th><th>Target</th><th>Kind</th>
-      <th>Folds</th><th>MAE</th><th>Direction</th><th>Balanced</th>
-      <th>Hit-rate 95% CI</th>
-    </tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-  </div>
-  <p class="sub">{blocked_count} specification(s) were refused by the
-  sample-size gate and never fitted. A refused specification is reported with
-  its binding requirement, not hidden.</p>
-  {later}
-
-  <p class="legend">
-    Intervals are session-cluster bootstraps. Baselines are re-scored on
-    exactly the sessions each news specification predicted, so a coverage
-    difference is not read as a model difference. <em>n/a</em> means a value
-    could not be defensibly computed. This artifact is immutable; a later
-    version performing differently does not revise it.
-    <strong>No result here is described as significant, and nothing on this
-    page is a trading signal, a recommendation or investment advice.</strong>
-  </p>
+  <details class="expander">
+    <summary>Full results, folds and protocol</summary>
+    <p class="sub">
+      <strong>Retrospective, on already-collected data.</strong> Folds run
+      forward in time and no training fold postdates its test fold, but this
+      corpus was collected and inspected before the protocol was written. An
+      untouched test needs data that did not exist yet &mdash; see Future
+      Validation.
+    </p>
+    <div class="table-scroll">
+    <table class="regime">
+      <thead><tr>
+        <th>Approach</th><th>Model</th><th>Target</th><th>Kind</th>
+        <th>Folds</th><th>Avg error</th><th>Direction</th><th>Balanced</th>
+        <th>Hit-rate 95% range</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    </div>
+    <p class="sub">{blocked_count} specification(s) were refused by the
+    sample-size gate and never fitted. A refused specification is reported with
+    its binding requirement, not hidden.</p>
+    {later}
+    <p class="sub versions">
+      protocol <code>{_esc(str(record["protocol_hash"])[:16])}</code> &middot;
+      frozen artifact <code>{_esc(str(record["artifact_hash"])[:16])}</code>
+      &middot; commit <code>{_esc(str(record["code_commit"] or "")[:12])}</code>
+      &middot; verdict
+      <span class="suff verdict-{_esc(record["verdict"])}">{_esc(record["verdict"])}</span>
+      &middot; frozen {_esc(str(record["frozen_at"])[:10])}
+    </p>
+    <p class="legend">
+      Ranges are session-cluster bootstraps. Baselines are re-scored on exactly
+      the sessions each news approach predicted, so a coverage difference is not
+      read as a model difference. <em>n/a</em> means a value could not be
+      defensibly computed. This artifact is immutable; a later version
+      performing differently does not revise it.
+      <strong>No result here is described as significant, and nothing on this
+      page is a trading signal, a recommendation or investment advice.</strong>
+    </p>
+  </details>
 </section>
 """
 
@@ -710,7 +1123,8 @@ def render_future_validation_section(readiness) -> str:
 
     controls = readiness.get("control_availability") or {}
     control_rows = "".join(
-        f"<tr><td><code>{_esc(name)}</code></td><td>{int(count)}</td></tr>"
+        f"<tr><td>{_esc(label(CONTROL_LABELS, name) if name != 'sessions_total' else 'Sessions in total')}</td>"
+        f"<td>{int(count)}</td></tr>"
         for name, count in controls.items()
     )
 

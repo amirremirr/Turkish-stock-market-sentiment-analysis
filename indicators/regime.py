@@ -35,6 +35,9 @@ REGIME_REPORT_VERSION = "news-regime-v1"
 # The domestic-only aggregate is stored in daily_family_signals under this key so
 # it lives beside the families without being one of them.
 DOMESTIC_COMPOSITE_KEY = "__domestic__"
+# Recap tone restates the index move rather than describing an economic topic,
+# so it is ranked separately from the economic families.
+MARKET_RECAP_KEY = "market_recap"
 
 _UNUSUAL_HIGH = 0.90
 _UNUSUAL_LOW = 0.10
@@ -55,6 +58,22 @@ def _latest_sessions(frame: pd.DataFrame, count: int) -> List[str]:
     if frame.empty or "signal_date" not in frame:
         return []
     return sorted(frame["signal_date"].dropna().unique())[-count:]
+
+
+def _recap_share(current: pd.DataFrame) -> Optional[float]:
+    """Share of the session's headlines that were market recap.
+
+    Computed across every family rather than from the recap family's own row,
+    because a recap headline is counted in whichever family it belongs to.
+    """
+
+    if current.empty or "market_recap_count" not in current:
+        return None
+    rows = current[current["signal_family"] != DOMESTIC_COMPOSITE_KEY]
+    total = int(rows["headline_count"].sum()) if not rows.empty else 0
+    if not total:
+        return None
+    return float(rows["market_recap_count"].sum()) / total
 
 
 def build_regime_report(
@@ -178,10 +197,17 @@ def build_regime_report(
             },
         })
 
+    # Two families are excluded from the economic ranking, for different reasons.
+    #
     # The domestic composite is an aggregate over families, so ranking it
     # against its own members would let it win by construction.
+    #
+    # market_recap is not an economic topic. Its tone restates the day's index
+    # move ("Borsa yükselişle kapandı"), so on any strong session it wins or
+    # loses the ranking mechanically and pushes out whatever news actually
+    # moved. Its share is reported separately instead.
     ranked = [f for f in families
-              if f["signal_family"] != DOMESTIC_COMPOSITE_KEY
+              if f["signal_family"] not in (DOMESTIC_COMPOSITE_KEY, MARKET_RECAP_KEY)
               and f["level"]["simple_mean"] is not None
               and f["sample_sufficiency"] == "sufficient"]
     by_level = sorted(ranked, key=lambda f: f["level"]["simple_mean"])
@@ -223,6 +249,12 @@ def build_regime_report(
             (f for f in families if f["signal_family"] == DOMESTIC_COMPOSITE_KEY),
             None,
         ),
+        # Reported beside the ranking rather than inside it, so a reader can see
+        # how much of the day was the market talking about itself.
+        "market_recap": next(
+            (f for f in families if f["signal_family"] == MARKET_RECAP_KEY), None,
+        ),
+        "market_recap_share": _recap_share(current),
         "top_positive_drivers": top_positive,
         "top_negative_drivers": top_negative,
         "notes": [
