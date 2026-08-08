@@ -279,8 +279,13 @@ def _run_status_display(status: str) -> tuple[str, str]:
     }.get(status, status)
     if canonical == "success":
         return "ok", "Running normally"
-    if canonical in {"degraded", "running"}:
-        return "warn", f"Last run: {canonical}"
+    if canonical == "degraded":
+        # Same wording as Overview. "degraded" is accurate and tells a
+        # non-technical reader nothing; the raw status stays on the run dots
+        # under Data Health, which is where the technical view belongs.
+        return "warn", "Data partially complete"
+    if canonical == "running":
+        return "warn", "Last run: running"
     return "bad", f"Last run: {canonical}"
 
 
@@ -383,6 +388,7 @@ def generate(db_path: str = DB_PATH, output: str = DASHBOARD_OUTPUT) -> str:
         "__HEADS__":       heads_html,
         "__DOTS__":        dots_html,
         "__RUN_STATUS__":  run_label,
+        "__LAST_STATUS_RAW__": str(last_status),
         "__RUN_CLS__":     run_cls,
         "__LABELS__":      json.dumps(labels),
         "__SCORES__":      json.dumps(scores),
@@ -497,9 +503,6 @@ __REGIME_CSS__
     </div>
   </div>
 
-  <footer>Generated automatically by dashboard.py &middot; data: RSS headlines + Yahoo Finance &middot;
-  sentiment: gpt-5-mini/p3 (83.3% agreement with the held-out project rubric)</footer>
-</div>
 
 <script>
 const labels  = __LABELS__;
@@ -564,7 +567,9 @@ __RESEARCH__
   <div class="card">
     <h3>Recent daily runs</h3>
     <div style="margin-top:6px">__DOTS__</div>
-    <div class="sub">one dot per pipeline run &mdash; hover for details.
+    <div class="sub">Latest run technical status:
+    <code>__LAST_STATUS_RAW__</code> &middot; one dot per pipeline run, hover for
+    details.
     <b>Data partially complete</b> means collection and scoring succeeded while
     at least one market input is still provisional: the morning run fires before
     the market opens, so the current session's price bar has not settled yet.</div>
@@ -585,6 +590,10 @@ __RESEARCH__
     <p>For the LLM backend the stored positive/neutral/negative components are
     synthetic compatibility fields, not calibrated probabilities.</p>
   </details>
+
+  <footer>Generated automatically by dashboard.py &middot; data: RSS headlines + Yahoo Finance &middot;
+  sentiment: gpt-5-mini/p3 (83.3% agreement with the held-out project rubric)</footer>
+</div>
 </body>
 </html>
 """

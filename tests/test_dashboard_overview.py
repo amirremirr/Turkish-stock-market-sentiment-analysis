@@ -214,6 +214,107 @@ class TestOverview:
 
 
 # ---------------------------------------------------------------------------
+class TestPageStructure:
+    """The generated page must be one container, closed once, at the end.
+
+    The wrapper previously closed after the first News & Events block, so every
+    later section rendered full-bleed outside the centred layout while looking
+    fine in isolation. Structure is checked by balancing tags rather than by
+    eyeballing the output, because that failure is invisible in a diff.
+    """
+
+    @pytest.fixture(scope="class")
+    def page(self, tmp_path_factory):
+        import dashboard
+        import database as db
+
+        path = str(tmp_path_factory.mktemp("dash") / "d.db")
+        db.init_db(db_path=path)
+        output = str(tmp_path_factory.mktemp("out") / "dashboard.html")
+        dashboard.generate(db_path=path, output=output)
+        return Path(output).read_text(encoding="utf-8")
+
+    def _body(self, page):
+        return page.split("<body>")[1].split("</body>")[0]
+
+    def _wrap_span(self, body):
+        start = body.index('<div class="wrap">')
+        depth = 0
+        for match in re.finditer(r"<div\b|</div>", body[start:]):
+            depth += 1 if match.group(0).startswith("<div") else -1
+            if depth == 0:
+                return start, start + match.end()
+        raise AssertionError("the .wrap container is never closed")
+
+    def test_exactly_one_wrap_container(self, page):
+        assert page.count('<div class="wrap">') == 1
+
+    def test_wrap_closes_at_the_end_of_the_body(self, page):
+        body = self._body(page)
+        _, end = self._wrap_span(body)
+        assert body[end:].strip() == "", "content renders outside the layout"
+
+    def test_every_section_is_inside_the_wrap(self, page):
+        body = self._body(page)
+        start, end = self._wrap_span(body)
+        inside = body[start:end]
+        for section in ("overview", "news-events", "research", "data-health"):
+            assert f'id="{section}"' in inside, f"{section} escaped the layout"
+
+    def test_footer_is_the_last_content(self, page):
+        body = self._body(page)
+        start, end = self._wrap_span(body)
+        position = body.rindex("<footer")
+        assert start < position < end, "the footer must sit inside the wrap"
+        after = re.sub(r"<footer.*?</footer>", "", body[position:], flags=re.S)
+        assert after.strip() == "</div>", "something renders after the footer"
+
+    def test_div_tags_balance(self, page):
+        body = self._body(page)
+        depth = lowest = 0
+        for match in re.finditer(r"<div\b|</div>", body):
+            depth += 1 if match.group(0).startswith("<div") else -1
+            lowest = min(lowest, depth)
+        assert depth == 0, "unbalanced <div> tags"
+        assert lowest >= 0, "a </div> closes a container that was never opened"
+
+
+class TestRunStatusPill:
+    def test_degraded_reads_as_partially_complete(self):
+        from dashboard import _run_status_display
+
+        assert _run_status_display("degraded") == ("warn", "Data partially complete")
+
+    def test_other_states_are_unchanged(self):
+        from dashboard import _run_status_display
+
+        assert _run_status_display("success") == ("ok", "Running normally")
+        assert _run_status_display("running") == ("warn", "Last run: running")
+        assert _run_status_display("failed") == ("bad", "Last run: failed")
+        assert _run_status_display("crashed") == ("bad", "Last run: failed")
+
+    def test_raw_status_is_still_available_for_data_health(self, tmp_path):
+        """Plain wording on the pill must not hide the technical state."""
+
+        import dashboard
+        import database as db
+        import sqlite3
+
+        path = str(tmp_path / "d.db")
+        db.init_db(db_path=path)
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "INSERT INTO pipeline_runs (started_at, status, headlines_scraped)"
+                " VALUES ('2026-08-08T06:30:00Z', 'degraded', 5)"
+            )
+        output = str(tmp_path / "dashboard.html")
+        dashboard.generate(db_path=path, output=output)
+        page = Path(output).read_text(encoding="utf-8")
+
+        assert '<span class="pill warn">Data partially complete</span>' in page
+        assert "<code>degraded</code>" in page, "raw status missing from Data Health"
+
+
 class TestReadableLabels:
     def test_identifiers_map_to_plain_language(self):
         assert label(WINDOW_LABELS, "prior_close_to_reactable_close") == (

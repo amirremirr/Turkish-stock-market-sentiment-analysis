@@ -101,7 +101,10 @@ def test_dashboard_uses_session_unweighted_baseline(tmp_path, monkeypatch):
     html = output.read_text(encoding="utf-8")
     assert "Session-aligned unweighted news mood" in html
     assert "Reaction session 2026-01-06" in html
-    assert 'class="pill warn">Last run: degraded' in html
+    # The pill shows user-facing wording; the raw status stays visible under
+    # Data Health so the technical state is not hidden, only de-jargonised.
+    assert 'class="pill warn">Data partially complete' in html
+    assert "<code>degraded</code>" in html
     assert 'class="dot warn"' in html
 
 
