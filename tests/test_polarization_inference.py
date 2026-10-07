@@ -305,3 +305,33 @@ def test_database_loader_preserves_cross_source_shared_url_observations(tmp_path
     report = _analyze(loaded)
     counts = {row["camp"]: row["count"] for row in report["raw_descriptives"]["by_camp"]}
     assert counts == {"opposition": 2, "pro_government": 1}
+
+
+def test_database_loader_counts_one_outlets_two_feeds_once(tmp_path):
+    path = tmp_path / "polarization-feeds.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE headlines (
+            id INTEGER PRIMARY KEY, source TEXT, title TEXT, published_at TEXT,
+            category TEXT, sentiment_score REAL, processing_status TEXT
+        );
+        CREATE TABLE raw_headline_observations (
+            observation_id INTEGER PRIMARY KEY, headline_id INTEGER,
+            source TEXT, title TEXT, published_at TEXT, published_timestamp TEXT
+        );
+        CREATE TABLE headline_exclusions (headline_id INTEGER, restored_at TEXT);
+        INSERT INTO headlines VALUES
+            (1, 'sozcu_gundem', 'same item', '2026-06-01', 'macro', -0.4, 'scored');
+        INSERT INTO raw_headline_observations VALUES
+            (10, 1, 'sozcu_gundem', 'same item', '2026-06-01', NULL),
+            (11, 1, 'sozcu_ekonomi', 'same item', '2026-06-01', NULL),
+            (12, 1, 'cumhuriyet_ekonomi', 'same item', '2026-06-01', NULL);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    loaded = inference.load_headlines(path)
+
+    assert list(loaded["source"]) == ["sozcu_gundem", "cumhuriyet_ekonomi"]

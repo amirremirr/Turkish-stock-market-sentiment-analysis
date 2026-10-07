@@ -1089,9 +1089,32 @@ def load_headlines(db_path: str | Path) -> pd.DataFrame:
             )
         else:
             query = canonical_select(only_without_raw=False) + " ORDER BY date, headline_id"
-        return pd.read_sql_query(query, connection)
+        frame = pd.read_sql_query(query, connection)
     finally:
         connection.close()
+    return _one_row_per_outlet(frame)
+
+
+# Feeds that belong to the same outlet. Distinct outlets carrying one story are
+# separate observations; one outlet's two feeds carrying it are not. Sozcu's
+# gundem and ekonomi feeds serve identical items, so without this every Sozcu
+# headline after the second feed was added counted twice for the opposition.
+OUTLET_OF_FEED = {
+    "sozcu_gundem": "sozcu",
+    "sozcu_ekonomi": "sozcu",
+    "aa_ekonomi": "aa",
+    "aa_politika": "aa",
+}
+
+
+def _one_row_per_outlet(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    outlet = frame["source"].map(lambda feed: OUTLET_OF_FEED.get(feed, feed))
+    # Rows arrive ordered by date then observation, so "first" is the
+    # earliest observation of that headline at that outlet.
+    keep = ~pd.DataFrame({"outlet": outlet, "headline_id": frame["headline_id"]}).duplicated()
+    return frame.loc[keep].reset_index(drop=True)
 
 
 def format_report(report: Mapping[str, Any]) -> str:
