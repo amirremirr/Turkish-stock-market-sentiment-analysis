@@ -59,7 +59,7 @@ At that point: **stop and report that the frozen validation is eligible to
 execute.** Do not run it, and do not change or optimise the protocol. A protocol
 adjusted at the moment of eligibility is not the protocol that was frozen.
 
-### Pending operational checkpoint
+### Operational checkpoint: 2026-08-07 bar promotion
 
 The 2026-08-07 BIST bar is `provisional` (volume 0.0,
 `observed_before_settlement`). The morning run fires before the open, so the bar
@@ -85,8 +85,42 @@ trading day at 16:10 UTC.
 python -m scripts.verify_all --db finance_sentiment.db
 ```
 
-Record the outcome in this section when it happens. This is an operational
-checkpoint, not a research checkpoint — no new one follows it.
+**Resolved (checked 2026-10-07 against `origin/data` @ `60a374c`).** The
+2026-08-07 bar is `complete` (volume 7.361e9) and readable by complete-only
+reads; `verify_all` passes on the production snapshot, including the frozen
+artifact and the 3465-headline reviewed-cohort digest. No research checkpoint
+follows it.
+
+### Maintenance log
+
+**2026-10-07.** 85/85 scheduled runs green since 2026-08-08. Fixed:
+
+- *The database was being committed to `main` daily.* The restore step used
+  `git checkout origin/data -- finance_sentiment.db`, which also stages the
+  file, so each "Update README chart" commit carried the ~40 MB database onto
+  `main` (48 copies). The restore now uses `git show` (no staging), the chart
+  commit names its one path, and the database is untracked on `main`. The
+  `data` branch remains the only copy. Old blobs still sit in `main`'s history.
+- *Readiness reported `abnormal_tone` as missing on every untouched session.*
+  `events_step` stored session units without the tone and regime inputs that
+  `scripts/run_validation.py` attaches, so the stored view disagreed with the
+  view a validation run builds. It now uses the same loaders. Coverage, not
+  outcomes: on the production snapshot it reads 42/42 present; the frozen
+  artifact still verifies.
+- *Atom feeds lost their URLs.* An ElementTree element with no children is
+  falsy, so `find(link) or {}` discarded `<link href>`; every `ntv_ekonomi`
+  headline was stored without a URL. Scores and categories are unaffected.
+
+Observed, deliberately **not** changed (source mix is an input to the sealed
+untouched sample):
+
+- `aa_politika` responds but its newest item is 2026-04-09; AA stopped updating
+  the feed, so it contributes nothing.
+- `sozcu_ekonomi` serves byte-identical content to `sozcu_gundem`; URL dedup
+  files every item under `sozcu_gundem`.
+- Every run reports `degraded` because the morning run stores the same-day bar
+  as `provisional` by construction. Expected, but it means `degraded` alone does
+  not signal a fault — read `warnings_json`.
 
 ## Two scheduled workflows
 
