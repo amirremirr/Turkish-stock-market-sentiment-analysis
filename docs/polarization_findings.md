@@ -49,6 +49,39 @@ evidence the mechanism is political.
   (r≈+0.09, p≈0.71, n≈19) — underpowered. Now that USD/TRY is collected daily,
   this is instrumented to be tested properly at 60+ overlap days.
 
+## Deeper: who drives the slant (`polarization_dynamics.py`)
+
+*Updated 2026-10-07: 5,014 scored headlines over 136 publication dates
+(2026-03-12 .. 2026-10-06). Intervals resample whole publication dates and
+resample the baseline with the camps, per
+[POLARIZATION_METHODS.md](POLARIZATION_METHODS.md); the July draft used an iid
+headline bootstrap with a fixed baseline, which overstated precision.*
+
+Using the **market-focused press as a neutral baseline** (Bloomberg HT, Investing;
+mean −0.06), the polarization is **asymmetric**, and not in the obvious direction:
+
+| Camp | n | Mean | Deviation from market baseline (95% CI) |
+|---|---|---|---|
+| Pro-government | 2,120 | +0.09 | **+0.15** [+0.12, +0.17] |
+| Opposition | 2,032 | −0.13 | −0.08 [−0.10, −0.05] |
+
+The pro-government press sits about twice as far from the baseline as the
+opposition press (asymmetry +0.068, date-cluster 95% CI [+0.019, +0.118];
+excludes 0, and consistent with July's +0.077 on a quarter of the data). The
+split is driven **more by pro-government optimism than by opposition
+pessimism**. Descriptive and observational: it describes outlet tone, says
+nothing about intent, and depends on the market press being a fair midpoint.
+
+**Stress hypothesis: not supported.** Does the gap widen in weeks the lira
+weakens? Over 18 weeks with enough coverage in both camps, Pearson r = +0.61
+(p = 0.01) looks like a yes, but it rests on two adjacent weeks (24 Aug: smallest
+gap, lira firmer; 31 Aug: large gap, largest depreciation). The rank correlation
+is ρ = +0.08 (p = 0.76), and leave-one-week-out Pearson ranges from +0.32 to
++0.67. Read as no reliable relationship at this sample size. The public-anxiety
+(Google Trends) leg could not be run: `external_series` holds no `gt_dolar` rows.
+
+![dynamics](polarization_dynamics.png)
+
 ## Limitations and how they're being addressed
 
 | Limitation | Status |
