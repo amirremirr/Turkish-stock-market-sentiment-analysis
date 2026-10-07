@@ -66,7 +66,8 @@ jobs:
         if: steps.guard.outputs.allowed == 'true'
         run: |
           if git fetch origin data 2>/dev/null; then
-            git checkout origin/data -- finance_sentiment.db \
+            git show origin/data:finance_sentiment.db > finance_sentiment.db.tmp \
+              && mv finance_sentiment.db.tmp finance_sentiment.db \
               && echo "Restored DB from data branch." \
               || echo "data branch has no DB file yet - nothing to refresh."
           else

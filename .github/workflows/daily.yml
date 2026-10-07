@@ -46,10 +46,14 @@ jobs:
       - name: Checkout repo (main)
         uses: actions/checkout@v4
 
+      # `git show`, not `git checkout <ref> -- file`: checkout also stages the
+      # file, and the README-chart commit below would then carry the whole
+      # database onto main every day.
       - name: Restore DB from data branch
         run: |
           if git fetch origin data 2>/dev/null; then
-            git checkout origin/data -- finance_sentiment.db \
+            git show origin/data:finance_sentiment.db > finance_sentiment.db.tmp \
+              && mv finance_sentiment.db.tmp finance_sentiment.db \
               && echo "Restored DB from data branch." \
               || echo "data branch has no DB file yet — starting fresh."
           else
@@ -126,7 +130,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "README chart is already current."
           else
-            git commit -m "Update README chart"
+            git commit -m "Update README chart" -- docs/sample_output.png
             git push origin HEAD:main
           fi
 
