@@ -919,6 +919,7 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
             MODELLING_UNIT_VERSION, attach_lagged_features, build_session_units,
             unit_counts,
         )
+        from scripts.run_validation import _load_abnormal_tone, _load_regimes
 
         frame = db.get_classified_headlines(db_path=db_path)
         if frame.empty:
@@ -1006,9 +1007,14 @@ def events_step(db_path: str = DB_PATH, *, return_outcome: bool = False):
 
         # The frozen modelling view. Built here so the walk-forward stage never
         # has to reconstruct the sample and risk reconstructing it differently.
+        # Tone and regime come from the same loaders the walk-forward run uses;
+        # without them the stored view (and the readiness report read from it)
+        # showed abnormal_tone as missing on every session.
         units = attach_lagged_features(
             build_session_units(built["dataset"]),
             factor_panel=build_control_panel(factor_rows),
+            abnormal_tone=_load_abnormal_tone(db_path),
+            regimes=_load_regimes(db_path),
         )
         db.replace_session_modelling_units(
             units, modelling_unit_version=MODELLING_UNIT_VERSION, db_path=db_path,
