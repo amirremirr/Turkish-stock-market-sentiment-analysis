@@ -361,9 +361,12 @@ class RSSFeedScraper:
                     continue
 
                 # -- url ---------------------------------------------------
+                # An Element with no children is falsy, so `find(...) or {}`
+                # would discard every Atom <link href=...> (ntv_ekonomi).
+                atom_link = item.find("{http://www.w3.org/2005/Atom}link")
                 link = (
                     item.findtext("link")
-                    or (item.find("{http://www.w3.org/2005/Atom}link") or {}).get("href", "")  # type: ignore[union-attr]
+                    or (atom_link.get("href", "") if atom_link is not None else "")
                     or ""
                 ).strip()
 
