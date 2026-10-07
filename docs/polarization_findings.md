@@ -1,9 +1,66 @@
 # Finding: political slant in Turkish financial-news sentiment
 
+![polarization](polarization.png)
+
+## October 2026 update (current)
+
+*Data: `origin/data` snapshot of 2026-10-07; 3,765 camp headlines over 130
+publication dates (2026-03-12 .. 2026-10-07). Rows come from
+`analysis.polarization.inference.load_headlines`: scored, not excluded by the
+relevance filter, one row per outlet per headline. Figure:
+`python -m analysis.polarization.figure`; numbers:
+`python polarization_analysis.py`.*
+
+The slant has **persisted and widened** since the July snapshot, and now rests
+on two opposition papers rather than one:
+
+| Camp | Outlet | n | Mean sentiment |
+|---|---|---|---|
+| Pro-government / state | Sabah | 536 | +0.13 |
+| | Anadolu Agency | 1,587 | +0.08 |
+| Opposition | Cumhuriyet | 689 | −0.15 |
+| | Sözcü | 953 | −0.18 |
+
+Pro-government minus opposition: **+0.255**, date-cluster 95% CI
+**[+0.234, +0.274]**, Cohen's d = 0.81; with topic and date fixed effects the camp
+coefficient is +0.21. (July: +0.20, d = 0.74, Sözcü only.) Cumhuriyet on its own
+sits well below every non-opposition outlet, so the opposition result is no
+longer one paper's house style.
+
+The topic structure also held. The gap is largest on politically loaded
+domestic topics and smallest on ones Ankara does not control:
+
+| Topic | Gap | n (pro / opp) |
+|---|---|---|
+| Banking | +0.35 | 65 / 96 |
+| Turkish economy | +0.30 | 555 / 235 |
+| Companies / BIST | +0.27 | 301 / 189 |
+| Political risk | +0.22 | 35 / 224 |
+| Rates / TCMB | +0.21 | 90 / 72 |
+| Global markets | +0.15 | 317 / 228 |
+| Other | +0.14 | 419 / 185 |
+| Energy & commodities | +0.12 | 329 / 314 |
+
+Energy and commodities still has the smallest gap, but it is no longer near
+zero (July: +0.04), so "outlets agree about oil" is now "outlets disagree least
+about oil".
+
+**Selection vs framing** is unchanged in spirit: on 224 lexically matched
+cross-camp pairs the mean gap is +0.15, but the median is 0 and only 49% of
+pairs lean pro-government. Those pairs are unverified matches, a sensitivity
+check rather than evidence of framing.
+
+**Measurement correction.** Sözcü's `ekonomi` and `gundem` RSS feeds serve
+identical items. Before 2026-10-08 the loader counted each such headline once
+per feed, so about 480 Sözcü headlines entered the opposition camp twice. The
+loader now counts one row per outlet; the gap moved from +0.264 to +0.255.
+
+*The July snapshot below is kept as originally written, for the record.*
+
+## July 2026 snapshot (historical)
+
 *Generated from `polarization_analysis.py`. Data: ~1,900 scored headlines,
 2026-03 to 2026-07.*
-
-![polarization](polarization.png)
 
 ## The result
 
@@ -51,34 +108,35 @@ evidence the mechanism is political.
 
 ## Deeper: who drives the slant (`polarization_dynamics.py`)
 
-*Updated 2026-10-07: 5,014 scored headlines over 136 publication dates
-(2026-03-12 .. 2026-10-06). Intervals resample whole publication dates and
-resample the baseline with the camps, per
-[POLARIZATION_METHODS.md](POLARIZATION_METHODS.md); the July draft used an iid
-headline bootstrap with a fixed baseline, which overstated precision.*
+*Updated 2026-10-08, same rows as the October update above. Intervals resample
+whole publication dates and resample the baseline together with the camps.*
 
-Using the **market-focused press as a neutral baseline** (Bloomberg HT, Investing;
-mean −0.06), the polarization is **asymmetric**, and not in the obvious direction:
+Taking the **market-focused press as a neutral midpoint** (Bloomberg HT,
+Investing; mean −0.06, n = 880):
 
 | Camp | n | Mean | Deviation from market baseline (95% CI) |
 |---|---|---|---|
-| Pro-government | 2,120 | +0.09 | **+0.15** [+0.12, +0.17] |
-| Opposition | 2,032 | −0.13 | −0.08 [−0.10, −0.05] |
+| Pro-government | 2,123 | +0.09 | +0.15 [+0.12, +0.18] |
+| Opposition | 1,642 | −0.17 | −0.11 [−0.14, −0.08] |
 
-The pro-government press sits about twice as far from the baseline as the
-opposition press (asymmetry +0.068, date-cluster 95% CI [+0.019, +0.118];
-excludes 0, and consistent with July's +0.077 on a quarter of the data). The
-split is driven **more by pro-government optimism than by opposition
-pessimism**. Descriptive and observational: it describes outlet tone, says
-nothing about intent, and depends on the market press being a fair midpoint.
+**Both camps sit clearly away from the market press, and neither side
+measurably dominates.** The pro-government deviation is larger in point terms
+(asymmetry +0.043), but the 95% CI [−0.008, +0.097] includes zero.
+
+*Correction.* A July draft, and a version committed on 2026-10-07, said the
+slant was driven mainly by pro-government optimism (asymmetry +0.068, CI
+excluding zero). That version read the headlines table directly, so it included
+relevance-excluded headlines and lacked the outlet de-duplication. On the
+maintained rows the asymmetry is not distinguishable from zero. The claim is
+withdrawn.
 
 **Stress hypothesis: not supported.** Does the gap widen in weeks the lira
-weakens? Over 18 weeks with enough coverage in both camps, Pearson r = +0.61
-(p = 0.01) looks like a yes, but it rests on two adjacent weeks (24 Aug: smallest
-gap, lira firmer; 31 Aug: large gap, largest depreciation). The rank correlation
-is ρ = +0.08 (p = 0.76), and leave-one-week-out Pearson ranges from +0.32 to
-+0.67. Read as no reliable relationship at this sample size. The public-anxiety
-(Google Trends) leg could not be run: `external_series` holds no `gt_dolar` rows.
+weakens? Over 18 weeks with at least 5 headlines per camp, Pearson r = +0.68
+looks like a yes, but it rests on two adjacent weeks (24 Aug: smallest gap,
+lira firmer; 31 Aug: large gap, largest depreciation). The rank correlation is
+ρ = +0.21 (p = 0.39). No reliable relationship at this sample size. The
+public-anxiety (Google Trends) leg could not run: `external_series` holds no
+`gt_dolar` rows.
 
 ![dynamics](polarization_dynamics.png)
 
@@ -86,6 +144,6 @@ is ρ = +0.08 (p = 0.76), and leave-one-week-out Pearson ranges from +0.32 to
 
 | Limitation | Status |
 |---|---|
-| "Opposition" was a single outlet (Sözcü) | **Being fixed:** Cumhuriyet (a distinct major opposition paper) + Sözcü's economy feed added 2026-07-07; the slant will be re-verified with a broader opposition camp as their history accumulates. |
+| "Opposition" was a single outlet (Sözcü) | **Resolved (October update).** Cumhuriyet now contributes 689 headlines and sits at −0.15 on its own. Sözcü's economy feed turned out to duplicate its gundem feed and adds no independent outlet. |
 | Sentiment is one LLM's measure | **Addressed.** Replicated with an independent model (`replicate_slant.py`): on the same 150+150 headlines, Gemini finds gap **+0.16** vs gpt-5-mini's **+0.20** (both *p* < 1e-7), and the two models agree headline-by-headline (*r* = 0.74). The slant is in the text, not one scorer's artifact. |
 | Framing vs selection (same story spun differently, or different stories covered?) | **Examined — and it complicates the story.** A same-story matcher (`same_story_analysis.py`) found 33 cross-camp pairs about the same event; *within* those pairs the gap shrinks to **+0.08 and is not significant** (p=0.12). So a large share of the overall slant appears to be **selection** (which stories each camp covers) rather than **framing** (spinning the same story). Framing is present on genuine matches (e.g. a Bosphorus transit-fee rise: pro-gov +0.30 vs opposition −0.30) but the crude lexical matcher is noisy; cleanly decomposing selection vs framing needs entity/event linking (migration Phase 6). **The robust claim is the *existence and topic-structure* of the slant, not that it is primarily framing bias.** |

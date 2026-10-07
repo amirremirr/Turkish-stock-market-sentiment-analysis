@@ -25,15 +25,16 @@ import pandas as pd
 from scipy import stats
 
 from config import ECONOMIC_CALENDAR
+from analysis.polarization.inference import load_headlines
 from polarization_analysis import PRO_GOV, OPPOSITION, MARKET
 
 
 def load():
     con = sqlite3.connect("finance_sentiment.db")
-    h = pd.read_sql_query(
-        "SELECT source, published_at AS date, sentiment_score AS s FROM headlines "
-        "WHERE sentiment_score IS NOT NULL AND published_at IS NOT NULL", con)
-    h["date"] = pd.to_datetime(h["date"])
+    # Same rows as the maintained inference report: scored, non-excluded, one
+    # row per outlet per headline (Sozcu's two identical feeds count once).
+    h = load_headlines("finance_sentiment.db").rename(columns={"sentiment": "s"})
+    h["date"] = pd.to_datetime(h["date"].astype(str).str[:10])
     fx = pd.read_sql_query(
         "SELECT date, close FROM market_factors WHERE symbol='USDTRY=X'", con).set_index("date")
     ext = pd.read_sql_query(

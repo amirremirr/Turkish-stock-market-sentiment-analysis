@@ -242,7 +242,7 @@ The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findi
 
 ![corpus overview](docs/corpus_overview.png)
 
-- **Currency/lira news skews most bearish** in the documented snapshot, while Turkish-economy news skews most bullish.
+- **Currency/lira news skews most bearish** in the October 2026 snapshot (−0.37), while Turkish-economy news skews most bullish.
 - **Outlets show systematic tone differences.** These are outlet-associated descriptive patterns, not causal estimates of political bias.
 - Emerging-markets, oil, and USD/TRY context series are collected so future work can separate Turkey-specific movement from broad market movement.
 
@@ -250,7 +250,7 @@ The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findi
 
 ![media polarization](docs/polarization.png)
 
-The maintained July snapshot shows a standardized outlet-associated difference of **Cohen's d = 0.74**, with dependence-aware date-cluster bootstrap uncertainty for the raw gap of roughly **0.19 to 0.24**. The underlying outlet means are **+0.11** for pro-government/state outlets and **-0.09** for the sampled opposition outlet(s), a descriptive gap of **+0.20**. Headlines share dates, outlets, and stories, so the analysis leads with clustered uncertainty and diagnostics rather than the naive unclustered *p*-value. Same-story comparisons suggest selection contributes substantially to the aggregate difference, while same-event framing is less precisely estimated because verified shared-event coverage is limited. These are historical, observational snapshot results—not a causal political-bias claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
+The October 2026 snapshot (130 publication dates, 3,765 camp headlines) shows a pro-government minus opposition tone gap of **+0.255**, date-cluster bootstrap 95% CI **[0.234, 0.274]**, Cohen's d = **0.81**; it was +0.20 (d = 0.74) in July. Outlet means: Sabah **+0.13**, Anadolu Agency **+0.08**, Cumhuriyet **−0.15**, Sözcü **−0.18**, so the opposition result no longer rests on a single paper. The gap is largest on banking and the Turkish economy and smallest on energy and commodities. Headlines share dates, outlets, and stories, so the analysis leads with clustered uncertainty and diagnostics rather than the naive unclustered *p*-value. Same-story comparisons suggest selection contributes substantially to the aggregate difference, while same-event framing is less precisely estimated because verified shared-event coverage is limited. Measured against the market-focused press, both camps deviate and neither measurably dominates. A gap-widens-under-lira-stress hypothesis was tested and is not supported. These are observational snapshot results, not a causal political-bias claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
 
 ## Run it
 
@@ -300,6 +300,7 @@ artifact:
 
 ```bash
 python -m analysis.polarization.inference --db finance_sentiment.db
+python -m analysis.polarization.figure --db finance_sentiment.db   # docs/polarization.png
 ```
 
 Run the fully offline public demo (no key, model download, private database, or
