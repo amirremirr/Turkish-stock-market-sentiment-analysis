@@ -59,6 +59,18 @@ At that point: **stop and report that the frozen validation is eligible to
 execute.** Do not run it, and do not change or optimise the protocol. A protocol
 adjusted at the moment of eligibility is not the protocol that was frozen.
 
+The runner and its scoring rules were fixed on 2026-10-08, before eligibility;
+see [FUTURE_VALIDATION_SCORING.md](FUTURE_VALIDATION_SCORING.md). Checking is
+safe at any time and never reads an outcome:
+
+```bash
+python -m scripts.run_future_validation --check --db finance_sentiment.db
+```
+
+Running it (without `--check`) is the owner's decision, made once. Three
+fittable folds need 80 untouched sessions; with fewer, the verdict is
+inconclusive by construction.
+
 ### Operational checkpoint: 2026-08-07 bar promotion
 
 The 2026-08-07 BIST bar is `provisional` (volume 0.0,
