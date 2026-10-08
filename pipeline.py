@@ -13,7 +13,7 @@ Steps (can be run independently or chained via run_all)
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
@@ -1146,7 +1146,21 @@ def prices_step(
             "and withheld from analysis until a later run confirms it",
             provisional_rows=counts["provisional"],
         ))
-    if flagged:
+    with db._conn(db_path) as con:
+        newest_stored = con.execute("SELECT MAX(date) FROM bist100_prices").fetchone()[0]
+    expected, unexpected = _split_expected_price_flags(flagged, newest_stored)
+    if expected:
+        price_warnings.append(_issue(
+            "market_data", "expected_price_flags",
+            "Flags that are expected and do not degrade the run: settled "
+            "historical backfill, and the current session stored before the "
+            "close",
+            by_reason={
+                reason: sum(1 for row in expected if row["bar_review_reason"] == reason)
+                for reason in sorted({row["bar_review_reason"] for row in expected})
+            },
+        ))
+    if unexpected:
         price_status = "degraded"
         price_warnings.append(_issue(
             "market_data", "price_bars_need_review",
@@ -1154,9 +1168,9 @@ def prices_step(
             rows=[
                 {"date": row["date"], "status": row["bar_status"],
                  "reason": row["bar_review_reason"]}
-                for row in flagged[:10]
+                for row in unexpected[:10]
             ],
-            flagged_total=len(flagged),
+            flagged_total=len(unexpected),
         ))
 
     logger.info(
@@ -1171,6 +1185,41 @@ def prices_step(
         },
     )
     return outcome if return_outcome else counts["written"]
+
+
+HISTORICAL_BACKFILL_REASON = "historical_backfill_settled_long_ago"
+
+
+def _split_expected_price_flags(
+    flagged: List[Dict[str, Any]], newest_stored: Optional[str],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Separate flags every healthy run carries from ones that need a person.
+
+    Two are expected. Backfilled history is settled and analysable; its reason
+    records provenance, not a defect. And the morning run fetches before the
+    Istanbul close, so the newest bar is provisional by construction until the
+    after-close job promotes it. Flagging either as degraded marked every run
+    degraded, so a real problem looked the same as an ordinary day.
+
+    A provisional bar that is *not* the newest one means a later run failed to
+    promote it, and that still degrades.
+    """
+
+    from price_bars import ANALYSABLE_STATUSES, REVIEW_BEFORE_SETTLEMENT
+
+    newest = str(newest_stored) if newest_stored else None
+    expected, unexpected = [], []
+    for row in flagged:
+        reason, status = row.get("bar_review_reason"), row.get("bar_status")
+        settled_backfill = (
+            reason == HISTORICAL_BACKFILL_REASON and status in ANALYSABLE_STATUSES
+        )
+        unsettled_today = (
+            reason == REVIEW_BEFORE_SETTLEMENT and status == "provisional"
+            and str(row["date"]) == newest
+        )
+        (expected if settled_backfill or unsettled_today else unexpected).append(row)
+    return expected, unexpected
 
 
 def _market_data_fallback_outcome(db_path: str, reason: str) -> StepOutcome:

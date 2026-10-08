@@ -316,3 +316,26 @@ def test_returns_recompute_on_the_complete_series_after_a_correction(price_db):
     recomputed = after["close"].pct_change().mul(100).tolist()
     assert recomputed[1] == pytest.approx(10.0)
     assert after.loc[1, "daily_return"] == pytest.approx(10.0)
+
+
+def test_expected_flags_do_not_degrade_but_a_stuck_provisional_bar_does():
+    from pipeline import _split_expected_price_flags
+
+    backfill = {"date": "2025-01-02", "bar_status": "complete",
+                "bar_review_reason": "historical_backfill_settled_long_ago"}
+    today = {"date": "2026-10-07", "bar_status": "provisional",
+             "bar_review_reason": "observed_before_settlement"}
+    stuck = {"date": "2026-10-06", "bar_status": "provisional",
+             "bar_review_reason": "observed_before_settlement"}
+    zero_volume = {"date": "2026-10-05", "bar_status": "complete",
+                   "bar_review_reason": "zero_volume_on_full_session"}
+
+    expected, unexpected = _split_expected_price_flags(
+        [backfill, today, stuck, zero_volume], "2026-10-07",
+    )
+    assert expected == [backfill, today]
+    assert unexpected == [stuck, zero_volume]
+
+    # Once today's bar has settled, yesterday's unpromoted one is not "today".
+    _, unexpected = _split_expected_price_flags([stuck], "2026-10-07")
+    assert unexpected == [stuck]
