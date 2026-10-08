@@ -519,6 +519,13 @@ def test_after_close_workflow_runs_a_runtime_guard_before_any_work():
             continue
         if step["name"] == "Report skip":
             continue
+        if step["name"] == "Open or update the failure issue":
+            # Reporting, not work: it must fire even when the guard itself
+            # fails, and it never touches the database or the data branch.
+            assert step.get("if") == "failure()"
+            assert "finance_sentiment.db" not in step["run"]
+            assert "git push" not in step["run"]
+            continue
         assert "steps.guard.outputs.allowed == 'true'" in step.get("if", ""), step["name"]
 
     # The prerequisites are also the only steps allowed to be that cheap: none

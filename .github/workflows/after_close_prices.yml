@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: write               # push the data branch
+  issues: write                 # open an issue when a scheduled run fails
 
 concurrency:
   # SHARED with daily.yml. Both jobs write the same SQLite file and force-push
@@ -118,3 +119,24 @@ jobs:
         run: |
           echo "Skipped: ${{ steps.guard.outputs.reason }}"
           echo "The market has not settled, or today is not a trading day."
+
+      # Scheduled failures otherwise surface only as an email GitHub may not
+      # send. An open issue notifies the owner and stays open until handled;
+      # repeat failures comment on it rather than opening new ones.
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled pipeline failing"
+          body="${{ github.workflow }} failed at $(date -u +%Y-%m-%dT%H:%MZ): ${RUN_URL}"
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body
+
+          Headlines that roll off the feeds before the next successful run cannot be recollected. Close this issue once runs are healthy again."
+          fi

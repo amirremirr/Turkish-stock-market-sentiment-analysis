@@ -1,0 +1,101 @@
+name: weekly-db-backup
+
+# The canonical database is a single force-pushed commit on the `data` branch.
+# A bad snapshot that slipped past the publication guard would leave nothing to
+# recover from, and headlines that have rolled off the feeds cannot be
+# recollected. This job keeps a rolling history outside that branch.
+#
+# Artifacts rather than releases: they expire on their own (90 days, about 13
+# weekly copies) and do not clutter the repository page.
+#
+# It is also the watchdog. A workflow that stops running produces no failure to
+# alert on, so this job fails -- and opens an issue -- when the newest headline
+# is older than STALE_AFTER_DAYS. The backup is uploaded first either way.
+
+on:
+  schedule:
+    - cron: "0 8 * * 6"          # Saturdays 08:00 UTC, after Friday's runs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  STALE_AFTER_DAYS: "4"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the canonical snapshot
+        run: |
+          git init -q .
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin data
+          git show FETCH_HEAD:finance_sentiment.db > finance_sentiment.db
+          echo "SNAPSHOT_COMMIT=$(git rev-parse --short FETCH_HEAD)" >> "$GITHUB_ENV"
+
+      - name: Check integrity and freshness
+        id: check
+        run: |
+          python3 - <<'PY'
+          import os, sqlite3, datetime, hashlib
+          path = "finance_sentiment.db"
+          con = sqlite3.connect(path)
+          integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+          headlines = con.execute("SELECT COUNT(*) FROM headlines").fetchone()[0]
+          newest = con.execute("SELECT MAX(scraped_at) FROM headlines").fetchone()[0]
+          prices = con.execute("SELECT MAX(date) FROM bist100_prices").fetchone()[0]
+          con.close()
+          digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+          age = (datetime.datetime.now(datetime.timezone.utc)
+                 - datetime.datetime.fromisoformat(newest.replace("Z", "+00:00"))).days
+          lines = [
+              f"integrity={integrity}", f"headlines={headlines}",
+              f"newest_headline={newest}", f"newest_price={prices}",
+              f"age_days={age}", f"sha256={digest}",
+          ]
+          print("\n".join(lines))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"integrity={integrity}\nage={age}\nsha={digest[:16]}\n")
+          with open("BACKUP_INFO.txt", "w") as info:
+              info.write("\n".join(lines + [f"data_commit={os.environ['SNAPSHOT_COMMIT']}"]) + "\n")
+          PY
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}-${{ steps.check.outputs.sha }}
+          path: |
+            finance_sentiment.db
+            BACKUP_INFO.txt
+          retention-days: 90
+          compression-level: 9
+
+      - name: Fail if the snapshot is corrupt or stale
+        run: |
+          if [ "${{ steps.check.outputs.integrity }}" != "ok" ]; then
+            echo "SQLite integrity check failed"; exit 1
+          fi
+          if [ "${{ steps.check.outputs.age }}" -gt "$STALE_AFTER_DAYS" ]; then
+            echo "Newest headline is ${{ steps.check.outputs.age }} days old; the pipeline has stopped writing"; exit 1
+          fi
+
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled pipeline failing"
+          body="${{ github.workflow }} failed at $(date -u +%Y-%m-%dT%H:%MZ): ${RUN_URL}"
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body
+
+          Headlines that roll off the feeds before the next successful run cannot be recollected. Close this issue once runs are healthy again."
+          fi
