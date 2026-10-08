@@ -719,6 +719,34 @@ CREATE TABLE IF NOT EXISTS future_validation_readiness (
     PRIMARY KEY (observed_at, definition_hash)
 );
 
+-- The one result of the untouched future test. Keyed by definition hash, so a
+-- second run of the same sealed test cannot be stored beside the first, and
+-- append-only so the first cannot be quietly replaced.
+CREATE TABLE IF NOT EXISTS future_validation_results (
+    definition_hash   TEXT PRIMARY KEY,
+    version           TEXT NOT NULL,
+    verdict           TEXT NOT NULL,
+    verdict_reason    TEXT NOT NULL,
+    untouched_sessions INTEGER NOT NULL,
+    folds             INTEGER NOT NULL,
+    news_specifications INTEGER NOT NULL,
+    code_commit       TEXT,
+    database_snapshot TEXT,
+    result_hash       TEXT NOT NULL,
+    result_json       TEXT NOT NULL,
+    completed_at      TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_future_validation_results_no_update
+BEFORE UPDATE ON future_validation_results
+BEGIN
+    SELECT RAISE(ABORT, 'future_validation_results is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_future_validation_results_no_delete
+BEFORE DELETE ON future_validation_results
+BEGIN
+    SELECT RAISE(ABORT, 'future_validation_results is append-only');
+END;
+
 -- Deterministic stratified sample for manual grouping review. Drawn without
 -- any reference to market returns, so a reviewer cannot be nudged by outcome.
 CREATE TABLE IF NOT EXISTS event_review_sample (
@@ -2265,6 +2293,56 @@ def list_frozen_results(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
                 "SELECT * FROM frozen_research_results ORDER BY frozen_at"
             )
         ]
+
+
+def get_future_validation_result(
+    definition_hash: str, db_path: str = DB_PATH,
+) -> Optional[Dict[str, Any]]:
+    """The stored untouched-future result for *definition_hash*, if any."""
+    with _conn(db_path) as con:
+        row = con.execute(
+            "SELECT * FROM future_validation_results WHERE definition_hash = ?",
+            (definition_hash,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def record_future_validation_result(
+    result: Dict[str, Any], db_path: str = DB_PATH,
+) -> Dict[str, Any]:
+    """Store the single result of a sealed future test.
+
+    Refuses a second result for the same definition rather than ignoring it:
+    the test runs once, and a different answer from a second run is exactly
+    what must never be able to replace the first.
+    """
+    import json as _json
+
+    digest = result["definition_hash"]
+    existing = get_future_validation_result(digest, db_path=db_path)
+    if existing:
+        raise RuntimeError(
+            f"untouched future result already recorded for {digest[:16]} "
+            f"at {existing['completed_at']}; the sealed test runs once"
+        )
+    with _conn(db_path) as con:
+        con.execute(
+            """INSERT INTO future_validation_results
+               (definition_hash, version, verdict, verdict_reason,
+                untouched_sessions, folds, news_specifications, code_commit,
+                database_snapshot, result_hash, result_json, completed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                digest, result["version"], result["verdict"],
+                result["verdict_reason"], result["untouched_sessions"],
+                result["folds"], result["news_specifications"],
+                result.get("code_commit"), result.get("database_snapshot"),
+                result["result_hash"],
+                _json.dumps(result, sort_keys=True, default=str),
+                result["completed_at"],
+            ),
+        )
+    return {"definition_hash": digest, "result_hash": result["result_hash"]}
 
 
 def register_future_validation(

@@ -61,6 +61,7 @@ REQUIRED_TABLES = {
     "frozen_research_results": ("artifact_hash", "conclusion"),
     "future_validation_definitions": ("first_eligible_session", "protocol_hash"),
     "future_validation_readiness": ("state", "eligible_to_run"),
+    "future_validation_results": ("verdict", "result_hash"),
     "event_review_sample": ("stratum", "group_key"),
     "experiment_assignment_audit": ("assigned_experiment_id", "evidence"),
     "event_group_audit": ("action", "actor"),
@@ -69,6 +70,7 @@ REQUIRED_TABLES = {
 APPEND_ONLY_TABLES = (
     "frozen_research_results",
     "future_validation_definitions",
+    "future_validation_results",
     "experiment_assignment_audit",
     "event_group_audit",
 )
