@@ -240,6 +240,29 @@ protocol at the moment it becomes testable.
 Standing responsibilities, the pre-readiness reporting surface, and the pending
 2026-08-07 bar checkpoint are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
+## Deferred until the untouched_future_v1 result is recorded
+
+Source changes alter the corpus that feeds the sealed test, so they wait for
+its single result (`future_validation_results`). Then, as a versioned corpus
+change:
+
+- remove `aa_politika`: the feed responds but has not published since
+  2026-04-09;
+- remove `sozcu_ekonomi`: it serves byte-identical items to `sozcu_gundem`,
+  and the polarization loader already counts Sözcü once per headline;
+- review `ntv_ekonomi`: it publishes a handful of items a week, and Atom URLs
+  are captured since 2026-10-08;
+- consider a replacement political-risk source to cover the gap `aa_politika`
+  left.
+
+## Next research project (proposed): stock-level KAP study
+
+The index target caps the sample at about 250 independent outcomes a year;
+company disclosures with stock-level abnormal returns do not. Plan, data and
+order of work: [docs/STOCK_LEVEL_STUDY_PLAN.md](docs/STOCK_LEVEL_STUDY_PLAN.md).
+It does not touch `untouched_future_v1`. It waits on KAP production access,
+though the historical dev sample is enough to build it.
+
 ## Approved decisions - implemented in Phase A
 
 These are settled research decisions, recorded so implementation does not relitigate them. **None is implemented yet.**

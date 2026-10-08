@@ -268,6 +268,14 @@ distinguishes headlines by **eligibility**, not just processing status:
 | `pending_excluded`, `retry_pending_excluded`, `failed_excluded` | carry an active exclusion; deliberately never scored |
 | `scored`, `scored_excluded`, `active_exclusions` | context |
 
+**Expected price flags do not degrade a run either** (since 2026-10-08). Two
+flags are on every healthy run: settled historical backfill
+(`historical_backfill_settled_long_ago`), and the newest bar stored as
+`provisional` because the morning run fetches before the Istanbul close. Both
+are reported under an informational `expected_price_flags` warning. A
+provisional bar that is not the newest stored bar means a later run failed to
+promote it, and that still degrades, as does any other flag.
+
 **Excluded headlines do not degrade a run.** The relevance filter withholds them
 at ingest and the scorer skips them by design, so counting them as unresolved
 marked every healthy run degraded and drained the meaning from that signal — run
@@ -344,6 +352,29 @@ git show origin/data:finance_sentiment.db | \
 
 A local backup of the pre-migration database is at
 `backups/production_pre_migration_2026-08-06.db` (gitignored, uncommitted).
+
+### Weekly backups
+
+`.github/workflows/backup.yml` runs Saturdays 08:00 UTC. It copies the `data`
+branch snapshot, checks SQLite integrity, and uploads the database as a 90-day
+Actions artifact (about 13 weekly copies, rotating on their own). To restore:
+
+```bash
+gh run list -R amirremirr/Turkish-stock-market-sentiment-analysis -w weekly-db-backup
+gh run download <run-id> -R amirremirr/Turkish-stock-market-sentiment-analysis
+```
+
+`BACKUP_INFO.txt` beside each copy records its sha256, headline count, newest
+headline and price date, and the `data` commit it came from. Run the
+publication guard against the current snapshot before pushing a restored copy.
+
+### Failure alerts
+
+A failed `daily-pipeline`, `after-close-prices` or `weekly-db-backup` run opens
+an issue titled **Scheduled pipeline failing**, or comments on it if one is
+already open. The backup job also fails when the newest headline is more than 4
+days old. That catches a schedule that silently stopped, which raises no
+failure of its own. Close the issue once runs are healthy.
 
 ### Stop the schedules
 
