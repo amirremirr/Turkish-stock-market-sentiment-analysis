@@ -1,9 +1,10 @@
-"""Resumable KAP block-sample ingestion from the MKK API Portal.
+"""Resumable KAP sample ingestion from the MKK API Portal.
 
 The listing endpoint returns 50 disclosures per call with no timestamp; the
 time, subject and body need one detail call each, at 6 calls a minute. So the
-study does not take a census. It takes ``KAP_FRAME_BLOCKS`` listing blocks
-spaced evenly across the available index range, fixed by constants and chosen
+study does not take a census. It takes ``KAP_FRAME_BLOCKS`` anchor indices
+spaced evenly across the available range and, at each, the next 50
+material-event disclosures. The anchors are fixed by constants and chosen
 without reference to any price.
 
 Blocks are processed in a strided order, so an interrupted run still covers the
@@ -30,25 +31,28 @@ import requests
 
 from stock_research import store
 from stock_research.config import (
-    KAP_BLOCK_SIZE, KAP_FRAME_BLOCKS, KAP_FRAME_FIRST_INDEX,
-    KAP_FRAME_LAST_INDEX, KAP_FRAME_VERSION, KAP_LISTED_MEMBER_MARK,
-    KAP_TARGET_CLASSES, KAP_THROTTLE_SECONDS, REPOSITORY_ROOT,
+    KAP_FRAME_BLOCKS, KAP_FRAME_FIRST_INDEX, KAP_FRAME_LAST_INDEX,
+    KAP_FRAME_STRIDE, KAP_FRAME_VERSION, KAP_LISTED_MEMBER_MARK,
+    KAP_LISTING_TYPES, KAP_TARGET_CLASSES, KAP_THROTTLE_SECONDS, REPOSITORY_ROOT,
 )
 
 logger = logging.getLogger("stock_research.kap")
 SOURCE = "mkk-api-portal-vyk-dev"
-_STRIDE = 73          # coprime with 120: visits blocks spread across the range
 
 
 def frame_blocks() -> List[Dict[str, int]]:
-    """The fixed sample: evenly spaced block starts and their processing order."""
+    """The fixed sample: evenly spaced anchors and their processing order.
 
-    span = KAP_FRAME_LAST_INDEX - KAP_BLOCK_SIZE - KAP_FRAME_FIRST_INDEX
+    The last anchor sits a little before the end of the range so that 50
+    filtered disclosures still follow it.
+    """
+
+    span = KAP_FRAME_LAST_INDEX - 1500 - KAP_FRAME_FIRST_INDEX
     blocks = []
     for seq in range(KAP_FRAME_BLOCKS):
         start = KAP_FRAME_FIRST_INDEX + round(seq * span / (KAP_FRAME_BLOCKS - 1))
         blocks.append({"block_seq": seq, "block_start": start})
-    order = sorted(range(KAP_FRAME_BLOCKS), key=lambda k: (k * _STRIDE) % KAP_FRAME_BLOCKS)
+    order = sorted(range(KAP_FRAME_BLOCKS), key=lambda k: (k * KAP_FRAME_STRIDE) % KAP_FRAME_BLOCKS)
     for position, seq in enumerate(order):
         blocks[seq]["process_order"] = position
     return blocks
@@ -234,9 +238,10 @@ def run(db_path=None, *, max_hours: float = 8.0,
         seq, start = block["block_seq"], block["block_start"]
 
         if block["status"] == "pending":
-            listing = api_get("/disclosures", {"disclosureIndex": str(start)})
-            listing = [i for i in listing
-                       if start <= int(i["disclosureIndex"]) < start + KAP_BLOCK_SIZE]
+            listing = api_get("/disclosures", {
+                "disclosureIndex": str(start),
+                "disclosureTypes": ",".join(KAP_LISTING_TYPES),
+            })
             with store.connect(db_path) as con:
                 for item in listing:
                     con.execute(

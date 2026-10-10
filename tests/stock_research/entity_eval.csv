@@ -1,0 +1,78 @@
+text|tickers|note
+THY, mart ayında 6,5 milyon yolcu taşıdığını açıkladı|THYAO|abbreviation
+Türk Hava Yolları 10 yeni uçak siparişi verdi|THYAO|full name
+Aselsan 250 milyon dolarlık sözleşme imzaladı|ASELS|
+ASELSAN'dan KAP'a yeni sözleşme bildirimi|ASELS|name in capitals
+Tüpraş'ın net kârı beklentileri aştı|TUPRS|possessive suffix
+Koç Holding'den dev satın alma|KCHOL|ambiguous alias with cue
+Sabancı Holding yeni yatırım kararını duyurdu|SAHOL|
+Şok Marketler 3. çeyrek bilançosunu açıkladı|SOKM|
+BİM mağaza sayısını 13 bine çıkardı|BIMAS|ambiguous alias with cue
+Garanti BBVA'dan 500 milyon dolarlık sendikasyon|GARAN|
+İş Bankası temettü dağıtacak|ISCTR|
+Ereğli Demir Çelik üretimi artırdı|EREGL|
+Erdemir hisseleri için hedef fiyat yükseltildi|EREGL|
+Ford Otosan ve Tofaş üretime ara veriyor|FROTO;TOASO|two issuers
+Turkcell ve Türk Telekom 5G için anlaştı|TCELL;TTKOM|two issuers
+Hisse senedi önerileri: THYAO, ASELS ve TUPRS öne çıkıyor|THYAO;ASELS;TUPRS|ticker tokens
+Pegasus yolcu sayısını yüzde 12 artırdı|PGSUS|ambiguous alias with cue
+Migros'tan 2 milyar liralık yatırım|MGROS|
+Emlak Konut GYO arsa ihalesini kazandı|EKGYO|
+Vestel beyaz eşya fabrikası için yatırım kararı aldı|VESTL|
+Arçelik'in Avrupa satışları geriledi|ARCLK|
+Ülker Bisküvi'nin cirosu arttı|ULKER|
+TAV Havalimanları yolcu trafiğini açıkladı|TAVHL|
+Zorlu Enerji tahvil ihraç edecek|ZOREN|
+Enerjisa'dan rekor yatırım|ENJSA|
+Akbank 2026 beklentilerini açıkladı|AKBNK|
+Yapı Kredi'nin net kârı 12 milyar lira|YKBNK|
+Vakıfbank sermaye artırımına gidiyor|VAKBN|
+Halkbank davasında yeni gelişme|HALKB|
+Kardemir'den bedelsiz sermaye artırımı kararı|KRDMD|
+Doğuş Otomotiv temettü ödeyecek|DOAS|
+Anadolu Efes Rusya operasyonlarını devretti|AEFES|
+Coca-Cola İçecek yeni fabrika açıyor|CCOLA|hyphenated name
+Petkim'de üretim durdu|PETKM|
+Şişecam Macaristan yatırımını tamamladı|SISE|
+Mavi Giyim mağaza sayısını artırdı|MAVI|
+Logo Yazılım pay geri alım programı başlattı|LOGO|
+Sasa Polyester yeni tesis yatırımını duyurdu|SASA|
+Koza Altın'da üretim arttı|KOZAL|
+Otokar'dan 110 milyon euroluk ihracat sözleşmesi|OTKAR|
+Türk Traktör üretime ara verdi|TTRAK|
+Hektaş bedelli sermaye artırımı yapacak|HEKTS|
+Alarko Holding'den yeni yatırım|ALARK|
+Tekfen Holding ihale kazandı|TKFEN|
+Enka İnşaat 1 milyar dolarlık sözleşme imzaladı|ENKAI|
+Kontrolmatik'ten ABD'de fabrika yatırımı|KONTR|
+Astor Enerji yeni trafo fabrikası kuruyor|ASTOR|
+Aksa Enerji Özbekistan'da santral kuruyor|AKSEN|must not link AKSA
+Çimsa çimento fiyatlarına zam yaptı|CIMSA|
+Albaraka Türk katılım bankası kârını açıkladı|ALBRK|
+BİM'de bu hafta indirimde neler var|BIMAS|casual mention, still the company
+Aselsan ve THY'nin de aralarında olduğu 10 şirket fuara katıldı|ASELS;THYAO|casual, two issuers
+Koç Topluluğu yöneticisi konferansta konuştu|KCHOL|ambiguous alias with cue
+Sabancı'nın holding hisseleri güne yükselişle başladı|SAHOL|cue after the name
+Şok gelişme: Dolar 45 lirayı aştı||ordinary word
+Koç burcu için bu hafta finansal uyarı||ordinary word
+Mavi vatan tatbikatı başladı||ordinary word
+Logo değişikliği tartışma yarattı||ordinary word
+Garanti süresi iki yıla çıkarılıyor||ordinary word
+Bankalar endeksi yüzde 3 yükseldi||sector
+Merkez Bankası faizi sabit tuttu||macro
+İş dünyası yeni vergi paketine tepki gösterdi||ordinary word
+Doğan görünümlü Şahin sahiplerine müjde||ordinary word
+Pegasus yazılımıyla dinleme skandalı||same name, different thing
+Sabancı Üniversitesi'nden yeni araştırma||related institution, not the issuer
+Ülker ailesi Forbes listesinde||family, not the issuer
+Tav tüfeği ile avlanma sezonu açıldı||ordinary word
+Enka Spor Kulübü şampiyon oldu||related institution, not the issuer
+Sasa köyünde sel felaketi||place name
+Astor filmi vizyona girdi||same name, different thing
+Otomotiv sektöründe üretim yüzde 5 arttı||sector
+DOLAR REKOR KIRDI, ALTIN YÜKSELDİ||all capitals: no ticker rule
+Altın fiyatları yükselişte, dolar geriledi||commodity
+Yapı ruhsatları yüzde 8 azaldı||word inside another phrase
+Garanti verilmeyen kredilerde risk arttı||ordinary word
+Enflasyon beklentileri geriledi||macro
+Akbank Sanat'ta yeni sergi açıldı|AKBNK|names the company; not material

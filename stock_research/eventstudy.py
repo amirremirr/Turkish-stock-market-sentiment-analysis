@@ -170,7 +170,18 @@ def event_table(panel: Panel, events: Iterable[Dict[str, Any]], *,
         study = study_event(panel, event["ticker"], event.get("day0"),
                             windows=windows, estimation=estimation, sealed=sealed)
         rows.append({**event, **study})
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    # An event with no result still has every outcome column, holding nothing.
+    # Otherwise a sample where no event could be studied has no such columns
+    # at all, and the caller fails instead of reporting an empty sample.
+    for window in windows:
+        for prefix in ("car", "mar", "bhar", "raw"):
+            name = window_label(window, prefix)
+            if name not in table.columns:
+                table[name] = np.nan
+    if "status" not in table.columns:
+        table["status"] = pd.Series(dtype=object)
+    return table
 
 
 def collapse_same_day(events: Sequence[Dict[str, Any]], *,

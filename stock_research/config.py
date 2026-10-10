@@ -20,18 +20,24 @@ SCHEMA_VERSION = "stock-research-schema-v1"
 #: reading them would be a look at it.
 SEALED_INDEX_BOUNDARY = "2026-08-10"
 
-# -- KAP block sample ----------------------------------------------------------
+# -- KAP sample ----------------------------------------------------------------
 #: The dev gateway serves a historical sample; these bounds were measured on
 #: 2026-10-11 (docs/stock_research/DATA_AVAILABILITY.md). One detail call per
 #: disclosure at 6 calls/minute makes a census infeasible, so the frame is a
-#: systematic sample of listing blocks, fixed before any return was read.
-KAP_FRAME_VERSION = "kap-block-sample-v1"
+#: systematic sample fixed before any return was read: evenly spaced anchor
+#: indices, and at each anchor the next 50 material-event disclosures.
+#:
+#: v1 listed unfiltered blocks and was abandoned after 9 blocks, before any
+#: price was read: two thirds of all disclosures are daily fund bulletins, so
+#: a block held about four usable events. v2 filters the listing by type.
+KAP_FRAME_VERSION = "kap-anchor-sample-v2"
 KAP_FRAME_FIRST_INDEX = 1_091_700
 KAP_FRAME_LAST_INDEX = 1_231_017
-KAP_FRAME_BLOCKS = 120
-KAP_BLOCK_SIZE = 50                 # the listing endpoint returns 50 per call
+KAP_FRAME_BLOCKS = 80
+KAP_FRAME_STRIDE = 37               # coprime with 80: processing order spreads over the year
+KAP_LISTING_TYPES = ("ODA", "CA")   # material events and structured corporate-action forms
 KAP_THROTTLE_SECONDS = 11           # free plan: 6 calls/minute
-KAP_TARGET_CLASSES = ("ODA",)       # material events, incl. structured CA forms
+KAP_TARGET_CLASSES = ("ODA",)
 KAP_LISTED_MEMBER_MARK = "IGS"      # "İşlem Gören Şirket": listed company
 
 # -- Event study ---------------------------------------------------------------

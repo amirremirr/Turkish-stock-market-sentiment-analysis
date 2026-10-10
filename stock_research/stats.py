@@ -94,6 +94,7 @@ def ols_cluster(X: np.ndarray, y: np.ndarray, clusters: Sequence[Sequence[Any]],
                 else "variance_not_positive", "se": None, "t": None, "p": None, "ci": None}
 
     se = np.sqrt(diagonal)
+    out["cov"] = variance.tolist()
     t = beta / se
     dof = min_groups - 1
     p = 2 * _scipy.t.sf(np.abs(t), dof)
@@ -103,6 +104,26 @@ def ols_cluster(X: np.ndarray, y: np.ndarray, clusters: Sequence[Sequence[Any]],
         "ci": [[float(b - critical * s), float(b + critical * s)] for b, s in zip(beta, se)],
     })
     return out
+
+
+def wald(fit: Dict[str, Any], restrictions: np.ndarray) -> Dict[str, Any]:
+    """Joint test of ``R beta = 0`` from a cluster-robust fit.
+
+    Uses an F reference with ``(q, G - 1)`` degrees of freedom, which is the
+    conservative small-cluster choice; ``q`` cannot exceed ``G - 1``.
+    """
+
+    if fit.get("status") != "ok":
+        return {"status": fit.get("status"), "p": None}
+    R = np.atleast_2d(np.asarray(restrictions, dtype=float))
+    beta, cov = np.asarray(fit["coef"]), np.asarray(fit["cov"])
+    q, dof = R.shape[0], fit["dof"]
+    middle = R @ cov @ R.T
+    if q > dof or np.linalg.matrix_rank(middle) < q:
+        return {"status": "too_few_clusters_for_joint_test", "p": None, "q": q, "dof": dof}
+    statistic = float((R @ beta) @ np.linalg.solve(middle, R @ beta) / q)
+    return {"status": "ok", "f": statistic, "q": q, "dof": dof,
+            "p": float(_scipy.f.sf(statistic, q, dof))}
 
 
 def cluster_mean(values: Sequence[float], clusters: Sequence[Sequence[Any]]) -> Dict[str, Any]:
