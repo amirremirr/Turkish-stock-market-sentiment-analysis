@@ -121,6 +121,8 @@ def run(ctx: Context) -> Dict[str, Any]:
     result["tables"]["lag_hours"] = {
         "median": float(lags.median()), "p10": float(lags.quantile(0.1)),
         "p90": float(lags.quantile(0.9)), "mean": float(lags.mean())}
+    counts_by_bin, edges = np.histogram(lags.clip(-24, 24), bins=16, range=(-24, 24))
+    result["tables"]["lag_histogram"] = {"edges": edges.tolist(), "counts": counts_by_bin.tolist()}
     divergence = matched["sentiment_divergence"].dropna()
     if len(divergence) >= 30:
         result["exploratory"].append({

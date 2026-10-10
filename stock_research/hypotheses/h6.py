@@ -241,6 +241,10 @@ def run(ctx: Context) -> Dict[str, Any]:
             "brier": float(np.mean((p - y) ** 2)), "auc": auc(y, p), "n": int(len(y))})
     result["tables"]["calibration_baseline_plus_news"] = calibration(y, predictions["baseline_plus_news"])
     result["tables"]["calibration_baseline"] = calibration(y, predictions["baseline"])
+    result["tables"]["hazard_by_length"] = [
+        {"streak_length": int(length), "ended_rate": float(group["ended"].mean()),
+         "n": int(len(group))}
+        for length, group in complete.groupby(complete["streak_length"].clip(upper=6))]
     result["sensitivity"].append({
         "variant": "Brier score, baseline minus baseline-plus-news",
         **stats.cluster_mean((predictions["baseline"] - y) ** 2

@@ -10,7 +10,9 @@ import pandas as pd
 from stock_research import stats
 from stock_research.calendar import CLEAN_REACTION_BUCKETS
 from stock_research.config import EVENT_WINDOWS
-from stock_research.eventstudy import STATUS_OK, collapse_same_day, flag_overlaps, window_label
+from stock_research.eventstudy import (
+    STATUS_OK, collapse_same_day, event_time_path, flag_overlaps, window_label,
+)
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
     Context, Spec, base_result, group_sufficient, insufficient, mean_test,
@@ -157,6 +159,11 @@ def run(ctx: Context) -> Dict[str, Any]:
     variant("two-way clustering (date, issuer)", sample, column, ["day0", "ticker"])
 
     result["tables"]["by_category"] = sizes.reset_index().to_dict("records")
+    result["tables"]["event_time"] = {
+        category: event_time_path(ctx.panel,
+                                  sample[sample["category"] == category].to_dict("records"),
+                                  sealed=ctx.sealed)
+        for category in kept}
     result["limitations"] += [
         "The sample is a systematic 80-anchor sample of 2023 disclosures, not a census.",
         "Issuers are those in the provider's current roster with prices available: "

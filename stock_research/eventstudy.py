@@ -184,6 +184,34 @@ def event_table(panel: Panel, events: Iterable[Dict[str, Any]], *,
     return table
 
 
+def event_time_path(panel: Panel, events: Iterable[Dict[str, Any]], *, first: int = -5,
+                    last: int = 20, sealed: Optional[str] = None) -> Dict[str, Any]:
+    """Mean cumulative market-adjusted return by session relative to day 0.
+
+    For figures. An event contributes only if every session from *first* to
+    *last* has a return; the path is cumulated from *first*, so its value at
+    day -1 is the pre-event run-up.
+    """
+
+    paths = []
+    market = panel.market["ret"].to_numpy()
+    for event in events:
+        frame = panel.frame(event["ticker"])
+        position = panel.calendar.index(event.get("day0")) if event.get("day0") else None
+        if frame is None or position is None or position + first < 1                 or position + last >= len(panel.calendar.sessions):
+            continue
+        if sealed is not None and panel.calendar.sessions[position + last] >= sealed:
+            continue
+        span = slice(position + first, position + last + 1)
+        excess = frame["ret"].to_numpy()[span] - market[span]
+        if np.isfinite(excess).all():
+            paths.append(np.cumsum(excess))
+    if not paths:
+        return {"days": list(range(first, last + 1)), "mean": [], "events": 0}
+    return {"days": list(range(first, last + 1)),
+            "mean": np.mean(paths, axis=0).tolist(), "events": len(paths)}
+
+
 def collapse_same_day(events: Sequence[Dict[str, Any]], *,
                       keys: Sequence[str] = ("ticker", "day0")) -> List[Dict[str, Any]]:
     """Merge events that share one outcome into one observation.

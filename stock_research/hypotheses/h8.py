@@ -9,7 +9,7 @@ import pandas as pd
 
 from stock_research import costs
 from stock_research.config import MIN_EVENT_DATES_PER_GROUP, MIN_EVENTS_PER_GROUP
-from stock_research.eventstudy import STATUS_OK, collapse_same_day, flag_overlaps
+from stock_research.eventstudy import STATUS_OK, event_time_path, flag_overlaps
 from stock_research.events import INSIDER_TRADE
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
@@ -136,6 +136,9 @@ def run(ctx: Context) -> Dict[str, Any]:
             "test": "purchase intensity: log(value / mean daily turnover)",
             **coefficient(fit, "log_intensity"), "n": fit.get("n")})
 
+    result["tables"]["event_time"] = {
+        "insider purchases": event_time_path(ctx.panel, usable.to_dict("records"),
+                                             sealed=ctx.sealed)}
     result["execution"] = {
         "strategy": "buy at the close of day 0 and hold 20 sessions, hedged with the index",
         "assumption": "fills at the closing auction on entry and exit; not verified",

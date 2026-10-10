@@ -67,3 +67,4 @@ candidate_feeds.txt
 stock_research.db
 stock_research.db-*
 stock_research_ingest.*
+outputs/stock_research/

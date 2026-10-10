@@ -116,6 +116,10 @@ def run(ctx: Context) -> Dict[str, Any]:
     for name in ("sentiment", "sent_x_gap"):
         result["exploratory"].append({"test": f"coefficient: {name}", **coefficient(fit, name)})
 
+    bins = pd.qcut(usable["gap"], 10, duplicates="drop")
+    result["tables"]["gap_bins"] = [
+        {"gap": float(group["gap"].mean()), "intraday": float(group["intraday"].mean()),
+         "n": int(len(group))} for _, group in usable.groupby(bins, observed=True)]
     cutoff = usable["gap"].abs().quantile(1 / 3)
     result["sensitivity"].append({
         "variant": "largest two thirds of absolute gaps",

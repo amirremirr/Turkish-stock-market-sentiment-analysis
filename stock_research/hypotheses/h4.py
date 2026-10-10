@@ -110,6 +110,11 @@ def run(ctx: Context) -> Dict[str, Any]:
         inference_status=fit.get("status", "ok"),
         extra={"n_dropped_missing": fit.get("n_dropped_missing")})
 
+    bins = pd.qcut(usable["abnormal_coverage"], 5, duplicates="drop")
+    result["tables"]["coverage_bins"] = [
+        {"abnormal_coverage": float(group["abnormal_coverage"].mean()),
+         "car_p1_p10": float(group["car_p1_p10"].mean()), "n": int(len(group))}
+        for _, group in usable.dropna(subset=["car_p1_p10"]).groupby(bins, observed=True)]
     for label, column in (("CAR(+2,+5)", "car_p2_p5"), ("CAR(+1,+20)", "car_p1_p20")):
         result["sensitivity"].append({
             "variant": label, **coefficient(regress(usable, column, xs, ["day0"]), "abnormal_coverage")})
