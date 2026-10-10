@@ -89,11 +89,15 @@ def detect(frame: pd.DataFrame, rules: Optional[List[Dict[str, Any]]] = None) ->
 
 
 def empirical_check(panel, rules: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """How well the bars agree with the rule: moves beyond the limit should be
-    rare, and limit-sized moves should pile up just under it."""
+    """How well the bars agree with the rule.
 
-    beyond = at_limit = sessions = 0
-    worst: List[Dict[str, Any]] = []
+    The panel sets a move beyond the limit to missing and records it, so the
+    count comes from those records: it is the number of stock-sessions the
+    provider's bars contradict the exchange's rule. Limit-sized moves should
+    pile up just under the limit.
+    """
+
+    at_limit = sessions = 0
     for ticker, frame in panel.bars.items():
         if ticker == panel.benchmark:
             continue
@@ -101,18 +105,20 @@ def empirical_check(panel, rules: Optional[List[Dict[str, Any]]] = None) -> Dict
         move = frame["raw_ret"].abs()
         usable = move.notna() & limit.notna()
         sessions += int(usable.sum())
-        over = usable & (move > limit + TOLERANCE)
-        beyond += int(over.sum())
-        at_limit += int((usable & (move >= limit - TOLERANCE) & ~over).sum())
-        for day in frame.index[over.to_numpy()][:3]:
-            worst.append({"ticker": ticker, "date": day, "move": float(frame.loc[day, "raw_ret"])})
+        at_limit += int((usable & (move >= limit - TOLERANCE)).sum())
+    beyond = [{"ticker": t, "date": i["date"]} for t, found in panel.issues.items()
+              for i in found if i["issue"] == "move_beyond_price_limit"]
+    by_date: Dict[str, int] = {}
+    for item in beyond:
+        by_date[item["date"]] = by_date.get(item["date"], 0) + 1
     return {
         "rule_version": LIMIT_RULE_VERSION, "sessions_checked": sessions,
-        "at_limit": at_limit, "beyond_limit": beyond,
-        "beyond_share": (beyond / sessions) if sessions else None,
-        "examples_beyond": worst[:15],
-        "reading": "beyond_limit should be near zero if the rule and the "
-                   "adjustment of the bars are both right",
+        "at_limit": at_limit, "beyond_limit": len(beyond),
+        "beyond_share": (len(beyond) / (sessions + len(beyond))) if sessions else None,
+        "beyond_by_date": dict(sorted(by_date.items(), key=lambda kv: -kv[1])[:10]),
+        "reading": "beyond_limit counts stock-sessions where the provider's bars "
+                   "contradict the rule; a cluster on one date points at a bad "
+                   "bar on or just before it",
     }
 
 

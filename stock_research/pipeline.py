@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from stock_research import events, guards, store
+from stock_research import events, guards, limits, store
 from stock_research.config import (
     BENCHMARK_TICKER, KAP_FRAME_VERSION, REPOSITORY_ROOT, SEALED_INDEX_BOUNDARY,
 )
@@ -178,6 +178,27 @@ def real_context(db_path=None, *, snapshot_id: Optional[str] = None,
     return ctx, meta
 
 
+def _issue_counts(ctx: Context) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for found in ctx.panel.issues.values():
+        for issue in found:
+            counts[issue["issue"]] = counts.get(issue["issue"], 0) + 1
+    return counts
+
+
+def _unserved(snapshot_id: str, db_path=None) -> Dict[str, int]:
+    """How many requested symbols the provider could not serve. Among them
+    are delisted companies, which is where survivorship bias enters."""
+
+    try:
+        with store.connect(db_path) as con:
+            return {row[0]: row[1] for row in con.execute(
+                "SELECT status, COUNT(*) FROM sr_price_availability WHERE snapshot_id = ? "
+                "GROUP BY status", (snapshot_id,))}
+    except sqlite3.OperationalError:
+        return {}
+
+
 def describe(ctx: Context, meta: Dict[str, Any]) -> Dict[str, Any]:
     """Counts only: what is in the sample, with no return anywhere in it."""
 
@@ -189,6 +210,12 @@ def describe(ctx: Context, meta: Dict[str, Any]) -> Dict[str, Any]:
         "tickers_with_price_issues": len(ctx.panel.issues),
         "kap_events": int(len(events_table)), "news": meta["news"],
         "availability": ctx.availability,
+        "price_issues": _issue_counts(ctx),
+        "calendar_gaps": ctx.panel.calendar_gaps,
+        "merged_sessions": ctx.panel.merged_sessions,
+        "cancelled_sessions": sorted(prices.CANCELLED_SESSIONS),
+        "price_limit_check": limits.empirical_check(ctx.panel),
+        "tickers_without_data": _unserved(meta["snapshot_id"]),
     }
     if len(events_table):
         out.update({

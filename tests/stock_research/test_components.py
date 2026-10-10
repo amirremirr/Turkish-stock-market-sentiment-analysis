@@ -239,7 +239,8 @@ def test_fill_rules_err_toward_not_filled():
     frame = panel.frame("X")
     assert costs.entry_fill(frame, days[1], limit=0.10) == costs.FILL_LOCKED
     assert costs.entry_fill(frame, days[2], limit=0.10) == costs.FILL_OK
-    assert costs.entry_fill(frame, days[3], limit=0.10) == costs.FILL_NO_VOLUME
+    # A zero-volume bar is a carried-forward price: in the panel it is no bar.
+    assert costs.entry_fill(frame, days[3], limit=0.10) == costs.FILL_NO_BAR
     assert costs.entry_fill(frame, "2030-01-01") == costs.FILL_NO_BAR
     assert costs.entry_fill(None, days[1]) == costs.FILL_NO_BAR
 

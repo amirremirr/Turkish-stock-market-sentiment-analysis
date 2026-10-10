@@ -128,6 +128,67 @@ def test_structural_defects_are_reported():
     assert (days[2], "zero_or_missing_volume") in found
 
 
+def test_a_cancelled_session_is_removed_so_the_next_return_starts_before_it():
+    # 2023-02-08: Borsa Istanbul annulled the session's trades.
+    days = ["2023-02-06", "2023-02-07", "2023-02-08", "2023-02-15", "2023-02-16"]
+    market = _flat(days, [100, 92, 92, 97, 98])
+    stock = _flat(days, [16.2, 14.7, 13.7, 16.17, 16.1])
+    panel = prices.build_panel({"MKT": market, "X": stock}, "MKT", origin="synthetic",
+                               snapshot_id="t")
+    assert "2023-02-08" not in panel.calendar.sessions
+    assert panel.frame("X")["ret"]["2023-02-15"] == pytest.approx(16.17 / 14.7 - 1)
+    assert {"date": "2023-02-08", "issue": "cancelled_session_bar_removed"} in panel.issues["X"]
+
+
+def test_a_zero_volume_bar_is_a_missing_session_not_a_zero_return():
+    days = fixtures.weekdays("2023-03-01", 5)
+    market = _flat(days, [100, 101, 102, 103, 104])
+    stock = _flat(days, [10, 11, 11, 11, 12])
+    stock.loc[[days[2], days[3]], "volume"] = 0.0        # price carried forward
+    panel = prices.build_panel({"MKT": market, "X": stock}, "MKT", origin="synthetic",
+                               snapshot_id="t")
+    ret = panel.frame("X")["ret"]
+    assert ret[days[1]] == pytest.approx(0.1)
+    assert ret[[days[2], days[3], days[4]]].isna().all()   # idle, idle, then spanning
+    # The benchmark keeps its bars whatever its volume field says.
+    market.loc[days[2], "volume"] = 0.0
+    panel = prices.build_panel({"MKT": market, "X": stock}, "MKT", origin="synthetic",
+                               snapshot_id="t")
+    assert panel.market["ret"].notna().sum() == 4
+
+
+def test_a_session_the_benchmark_lacks_is_merged_and_flagged():
+    days = fixtures.weekdays("2023-12-20", 6)
+    stocks = {f"S{i}": _flat(days, [10, 10.2, 10.4, 10.6, 10.8, 11.0]) for i in range(4)}
+    market = _flat(days, [100, 101, 102, 103, 104, 105]).drop(index=days[3])
+    panel = prices.build_panel({"MKT": market, **stocks}, "MKT", origin="synthetic",
+                               snapshot_id="t")
+    assert panel.calendar_gaps == [days[3]] and panel.merged_sessions == [days[4]]
+    frame = panel.frame("S0")
+    # Two-day return on both sides, so the abnormal return stays meaningful...
+    assert frame["ret"][days[4]] == pytest.approx(10.8 / 10.4 - 1)
+    assert panel.market["ret"][days[4]] == pytest.approx(104 / 102 - 1)
+    # ...but the gap and the prior-close move are not same-day quantities there.
+    assert np.isnan(frame["raw_ret"][days[4]]) and np.isnan(frame["gap"][days[4]])
+    assert np.isfinite(frame["raw_ret"][days[5]])
+
+
+def test_a_move_beyond_the_price_limit_is_a_defect_not_a_return():
+    days = fixtures.weekdays("2022-12-14", 4)
+    market = _flat(days, [100, 100, 100, 100])
+    stock = _flat(days, [91.8, 94.1, 94.85, 110.0])       # +16% in one session
+    panel = prices.build_panel({"MKT": market, "X": stock}, "MKT", origin="synthetic",
+                               snapshot_id="t")
+    frame = panel.frame("X")
+    assert np.isnan(frame["ret"][days[3]]) and np.isnan(frame["raw_ret"][days[3]])
+    assert {"date": days[3], "issue": "move_beyond_price_limit"} in panel.issues["X"]
+    assert frame["ret"][days[2]] == pytest.approx(94.85 / 94.1 - 1)
+    # A full-limit move is allowed.
+    ok = _flat(days, [100, 100, 100, 110.0])
+    panel = prices.build_panel({"MKT": market, "X": ok}, "MKT", origin="synthetic", snapshot_id="t")
+    assert panel.frame("X")["ret"][days[3]] == pytest.approx(0.10)
+
+
 def test_market_cap_is_declared_unavailable_not_approximated():
     availability = prices.market_cap_availability()
     assert not availability.available and "look-ahead" in availability.reason
@@ -236,7 +297,7 @@ def test_null_events_are_rejected_at_about_the_nominal_rate():
                                          sector_sd=0.01)
         events = fixtures.random_events(panel, 120, seed=trial, first=140, per_day=4)
         table = event_table(panel, events, windows=((0, 1),))
-        ok = table[table["status"] == STATUS_OK]
+        ok = table[(table["status"] == STATUS_OK) & table["car_p0_p1"].notna()]
         result = stats.cluster_mean(ok["car_p0_p1"], [ok["day0"]])
         rejections += result["p"] < 0.05
     assert rejections / trials < 0.10

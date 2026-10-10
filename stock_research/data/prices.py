@@ -13,6 +13,22 @@ Three rules run through this module:
   ``JUMP_THRESHOLD`` with no recorded action is more likely an unadjusted
   capital change than a price move the exchange's limits would allow. It is
   flagged and set to missing.
+* **A move the exchange forbids is not a return.** Where a verified price
+  limit applies, a one-session move beyond it cannot have happened; it means
+  one of the two bars is wrong (a partial bar, an unrecorded capital change).
+  It is flagged ``move_beyond_price_limit`` and set to missing.
+* **A bar with no volume is not a trade.** Providers carry the last price
+  forward on days a stock did not trade. Read as a bar, that is a fabricated
+  zero return, so for stocks it is treated as a missing session.
+* **A cancelled session never happened.** ``CANCELLED_SESSIONS`` lists dates
+  whose trades the exchange annulled; their leftover bars are removed from
+  every series before anything is computed.
+* **A session the benchmark lacks is merged, and said to be.** The calendar is
+  the benchmark's. If most stocks traded on a date the benchmark has no bar
+  for, that date folds into the next session for stock and market alike: the
+  close-to-close return there is a two-day return on both sides, which keeps
+  abnormal returns valid, while same-day quantities (the gap, the
+  prior-close move used for price limits) are withheld on the merged session.
 """
 
 from __future__ import annotations
@@ -27,7 +43,24 @@ from stock_research import store
 from stock_research.calendar import SessionCalendar
 
 BAR_COLUMNS = ["open", "high", "low", "close", "adj_close", "volume", "dividend", "split_ratio"]
-PRICE_RULE_VERSION = "stock-price-rules-v1"
+PRICE_RULE_VERSION = "stock-price-rules-v2"
+
+#: Sessions whose trades were annulled by the exchange. A provider may still
+#: serve a bar for them; using it would measure the next return from a price
+#: that officially does not exist.
+CANCELLED_SESSIONS: Dict[str, str] = {
+    "2023-02-08": (
+        "Borsa Istanbul halted trading after the 6 February earthquakes and "
+        "cancelled all trades executed on 8 February 2023; the market reopened "
+        "on 15 February. Source: Anadolu Agency, 'Turkish stock exchange reopens "
+        "on Wednesday' (aa.com.tr/en/economy/turkish-stock-exchange-reopens-on-"
+        "wednesday/2820232); AGBI/Reuters, 'Turkish bourse shuts for five days "
+        "and cancels trades after quake'."
+    ),
+}
+#: Share of stocks that must have traded on a date for it to count as a
+#: session the benchmark is missing.
+CALENDAR_GAP_SHARE = 0.5
 #: Above any daily price limit Borsa Istanbul has applied to equities, so a
 #: close-to-close move this large without a corporate action is a data defect.
 JUMP_THRESHOLD = 0.25
@@ -196,6 +229,10 @@ class Panel:
     origin: str
     snapshot_id: str
     issues: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    #: Dates most stocks traded but the benchmark has no bar for.
+    calendar_gaps: List[str] = field(default_factory=list)
+    #: Sessions that absorbed one or more of those dates.
+    merged_sessions: List[str] = field(default_factory=list)
 
     def frame(self, ticker: str) -> Optional[pd.DataFrame]:
         return self.bars.get(ticker)
@@ -205,10 +242,18 @@ class Panel:
         return self.bars[self.benchmark]
 
 
-def derive(frame: pd.DataFrame, sessions: Sequence[str]) -> tuple[pd.DataFrame, List[Dict[str, Any]]]:
+def derive(frame: pd.DataFrame, sessions: Sequence[str], *, is_benchmark: bool = False,
+           merged: Sequence[str] = ()) -> tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Align one ticker to *sessions* and add returns, with missing states."""
 
     issues = validate_bars(frame)
+    if not is_benchmark:
+        # An index has no volume of its own to speak of; a stock without
+        # volume did not trade, and its bar is the provider's carry-forward.
+        idle = frame["volume"].isna() | (frame["volume"] <= 0)
+        if idle.any():
+            frame = frame.copy()
+            frame.loc[idle, ["open", "high", "low", "close", "adj_close"]] = np.nan
     aligned = frame.reindex(list(sessions)).astype(float)
     action = (aligned["dividend"].fillna(0) != 0) | (aligned["split_ratio"].fillna(0) != 0)
 
@@ -226,13 +271,27 @@ def derive(frame: pd.DataFrame, sessions: Sequence[str]) -> tuple[pd.DataFrame, 
     bad_mask = pd.Series(aligned.index.isin(bad), index=aligned.index)
     ret = ret.mask(bad_mask | bad_mask.shift(1, fill_value=False))
 
+    prior_close = aligned["close"].shift(1)
+    same_day_ok = ~action & ~aligned.index.isin(bad) & ~aligned.index.isin(list(merged))
+    raw_ret = (aligned["close"] / prior_close - 1.0).where(same_day_ok)
+
+    if not is_benchmark:
+        from stock_research.limits import TOLERANCE, limit_on
+
+        limit = pd.Series([limit_on(day) for day in aligned.index], index=aligned.index,
+                          dtype=float)
+        forbidden = (raw_ret.abs() > limit + TOLERANCE).fillna(False)
+        for day in aligned.index[forbidden.to_numpy()]:
+            issues.append({"date": day, "issue": "move_beyond_price_limit"})
+        ret = ret.mask(forbidden)
+        same_day_ok = same_day_ok & ~forbidden
+        raw_ret = raw_ret.where(same_day_ok)
+
     aligned["ret"] = ret
     aligned["corporate_action"] = action
-    prior_close = aligned["close"].shift(1)
-    same_day_ok = ~action & ~aligned.index.isin(bad)
     aligned["gap"] = np.log(aligned["open"] / prior_close).where(same_day_ok)
     aligned["intraday"] = np.log(aligned["close"] / aligned["open"]).where(same_day_ok)
-    aligned["raw_ret"] = (aligned["close"] / prior_close - 1.0).where(same_day_ok)
+    aligned["raw_ret"] = raw_ret
     aligned["turnover"] = aligned["close"] * aligned["volume"]
     return aligned, issues
 
@@ -241,17 +300,45 @@ def build_panel(frames: Dict[str, pd.DataFrame], benchmark: str, *, origin: str,
                 snapshot_id: str) -> Panel:
     if benchmark not in frames or frames[benchmark].empty:
         raise ValueError(f"benchmark {benchmark!r} has no bars; no calendar can be built")
-    market = frames[benchmark]
-    calendar = SessionCalendar(market.index[market["close"].notna()])
-    bars, issues = {}, {}
+    cleaned: Dict[str, pd.DataFrame] = {}
+    issues: Dict[str, List[Dict[str, Any]]] = {}
     for ticker, frame in frames.items():
         if frame is None or frame.empty:
             continue
         frame = frame[~frame.index.duplicated(keep="last")].sort_index()
-        bars[ticker], found = derive(frame, calendar.sessions)
+        annulled = frame.index.isin(list(CANCELLED_SESSIONS))
+        if annulled.any():
+            issues.setdefault(ticker, []).extend(
+                {"date": day, "issue": "cancelled_session_bar_removed"}
+                for day in frame.index[annulled])
+            frame = frame[~annulled]
+        cleaned[ticker] = frame
+
+    market = cleaned[benchmark]
+    calendar = SessionCalendar(market.index[market["close"].notna()])
+
+    # Dates the benchmark lacks but the market evidently traded.
+    stocks = [f for t, f in cleaned.items() if t != benchmark]
+    gaps: List[str] = []
+    if stocks:
+        traded: Dict[str, int] = {}
+        for frame in stocks:
+            active = frame.index[(frame["volume"].fillna(0) > 0) & frame["close"].notna()]
+            for day in active:
+                if calendar.first < day < calendar.last and not calendar.is_session(day):
+                    traded[day] = traded.get(day, 0) + 1
+        gaps = sorted(day for day, count in traded.items()
+                      if count >= CALENDAR_GAP_SHARE * len(stocks))
+    merged = sorted({calendar.on_or_after(day) for day in gaps} - {None})
+
+    bars: Dict[str, pd.DataFrame] = {}
+    for ticker, frame in cleaned.items():
+        bars[ticker], found = derive(frame, calendar.sessions,
+                                     is_benchmark=(ticker == benchmark), merged=merged)
         if found:
-            issues[ticker] = found
-    return Panel(calendar, bars, benchmark, origin, snapshot_id, issues)
+            issues.setdefault(ticker, []).extend(found)
+    return Panel(calendar, bars, benchmark, origin, snapshot_id, issues,
+                 calendar_gaps=gaps, merged_sessions=merged)
 
 
 def load_panel(snapshot_id: str, benchmark: str, db_path=None, *,

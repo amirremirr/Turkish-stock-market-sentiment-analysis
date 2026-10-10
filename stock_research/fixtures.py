@@ -28,7 +28,10 @@ Effects = Dict[Tuple[str, int], float]            # (ticker, session index) -> r
 
 
 def weekdays(start: str, count: int, *, skip: Sequence[str] = ()) -> List[str]:
-    day, out, skipped = date.fromisoformat(start), [], set(skip)
+    # An annulled session is not a session, in a synthetic calendar either.
+    from stock_research.data.prices import CANCELLED_SESSIONS
+
+    day, out, skipped = date.fromisoformat(start), [], set(skip) | set(CANCELLED_SESSIONS)
     while len(out) < count:
         if day.weekday() < 5 and day.isoformat() not in skipped:
             out.append(day.isoformat())
