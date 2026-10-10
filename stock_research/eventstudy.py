@@ -227,18 +227,42 @@ def collapse_same_day(events: Sequence[Dict[str, Any]], *,
     for event in events:
         key = tuple(event.get(k) for k in keys)
         if key not in merged:
-            merged[key] = {**event, "n_events": 0, "categories": [], "event_ids": []}
+            merged[key] = {**event, "n_events": 0, "categories": [], "event_ids": [],
+                           "buckets": []}
         row = merged[key]
         row["n_events"] += 1
+        # Events that share a day 0 can still differ in when they were
+        # published. A row built from a pre-open and a during-session filing
+        # does not have a clean first reaction, and must not be labelled as if
+        # it did.
+        if event.get("bucket") not in row["buckets"]:
+            row["buckets"].append(event.get("bucket"))
         row["event_ids"].append(event.get("event_id"))
         category = event.get("category")
         if category is not None and category not in row["categories"]:
             row["categories"].append(category)
     for row in merged.values():
+        row["bucket"] = row["buckets"][0] if len(row["buckets"]) == 1 else "mixed"
         row["n_categories"] = len(row["categories"])
         row["category"] = row["categories"][0] if row["n_categories"] == 1 else (
             "mixed" if row["categories"] else None)
     return list(merged.values())
+
+
+def non_overlapping(table: pd.DataFrame, horizon: int, calendar) -> pd.Series:
+    """True for events kept when each issuer's events are thinned so that no
+    two kept events are within *horizon* sessions: the earliest is kept, then
+    the next one more than *horizon* sessions after the last kept one."""
+
+    position = table["day0"].map(lambda d: calendar.index(d) if isinstance(d, str) else None)
+    keep = pd.Series(False, index=table.index)
+    for _, group in table.assign(_pos=position).dropna(subset=["_pos"]).groupby("ticker"):
+        last = None
+        for index, value in group.sort_values("_pos")["_pos"].items():
+            if last is None or value - last > horizon:
+                keep.loc[index] = True
+                last = value
+    return keep
 
 
 def flag_overlaps(table: pd.DataFrame, horizon: int, calendar) -> pd.Series:

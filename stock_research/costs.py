@@ -86,11 +86,14 @@ def entry_fill(frame: Optional[pd.DataFrame], session: Optional[str], *,
     return FILL_OK
 
 
-def net_summary(gross: Sequence[float], *, trades_per_observation: int = 1) -> Dict[str, Any]:
+def net_summary(gross: Sequence[float], *, round_trips: int = 1) -> Dict[str, Any]:
     """Gross mean and the same mean after each cost scenario.
 
-    ``gross`` holds one signed return per executed trade. A value that could
-    not be executed must not be in it; the caller reports coverage separately.
+    ``gross`` holds one return per executed trade. A value that could not be
+    executed must not be in it; the caller reports coverage separately.
+    ``round_trips`` is how many round trips one observation needs: a position
+    hedged with the index is two (the stock and the hedge), and charging it
+    for one would flatter it.
     """
 
     values = np.asarray([g for g in gross if g is not None and np.isfinite(g)], dtype=float)
@@ -98,12 +101,13 @@ def net_summary(gross: Sequence[float], *, trades_per_observation: int = 1) -> D
         "cost_model_version": COST_MODEL_VERSION,
         "trades": int(len(values)),
         "gross_mean": float(values.mean()) if len(values) else None,
+        "round_trips_per_trade": round_trips,
         "note": "cost scenarios are assumptions, not measured fees",
         "net_mean": {},
     }
     for name, cost in scenarios().items():
         out["net_mean"][name] = (
-            float(values.mean() - cost * trades_per_observation) if len(values) else None
+            float(values.mean() - cost * round_trips) if len(values) else None
         )
     return out
 

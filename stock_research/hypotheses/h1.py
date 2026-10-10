@@ -12,7 +12,7 @@ from stock_research.config import MIN_EVENT_DATES_PER_GROUP, MIN_EVENTS_PER_GROU
 from stock_research.eventstudy import STATUS_OK
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
-    Context, Spec, base_result, coefficient, group_sufficient, insufficient,
+    TWO_WAY, Context, Spec, base_result, coefficient, group_sufficient, insufficient,
     mean_test, missing_requirements, primary_block, regress,
 )
 
@@ -36,13 +36,16 @@ SPEC = Spec(
     material_effect=0.005,
     benchmark="market model on XU100, estimation window -130..-11",
     controls=("mid-cap indicator", "prior_ret_5", "log_turnover_20"),
-    inference="OLS, standard errors clustered by day 0",
+    inference="OLS, standard errors clustered two ways, by day 0 and by issuer",
     sufficiency={"min_events_per_tercile": MIN_EVENTS_PER_GROUP,
                  "min_event_dates": MIN_EVENT_DATES_PER_GROUP},
     requires=("news_events", "point_in_time_market_cap"),
-    sensitivity=("market-adjusted drift instead of market-model",
+    sensitivity=("clustering by day 0 only",
+                 "market-adjusted drift instead of market-model",
                  "immediate reaction CAR(0,+1) by tercile",
                  "positive and negative events separately"),
+    parameters={"drift_window": [2, 5], "reaction_window": [0, 1],
+                "terciles": "of all stocks' capitalisation on the last date before day 0"},
 )
 
 
@@ -81,7 +84,7 @@ def run(ctx: Context) -> Dict[str, Any]:
     result["sufficiency"]["counts"] = counts
 
     xs = ["small", "mid", "prior_ret_5", "log_turnover_20"]
-    fit = regress(usable, "signed_drift", xs, ["day0"])
+    fit = regress(usable, "signed_drift", xs, TWO_WAY)
     small = coefficient(fit, "small")
     result["primary"] = primary_block(
         SPEC, estimate=small["estimate"], se=small["se"], ci=small["ci"], p=small["p"],
@@ -92,7 +95,7 @@ def run(ctx: Context) -> Dict[str, Any]:
     for label, column in (("drift CAR(+2,+5)", "signed_drift"),
                           ("reaction CAR(0,+1)", "signed_reaction")):
         for tercile, group in usable.groupby("tercile"):
-            test = mean_test(group[column], group["day0"])
+            test = mean_test(group[column], group["day0"], group["ticker"])
             result["exploratory"].append({"test": f"{label}, {tercile}", **test})
     if len(usable) >= 5 * MIN_EVENTS_PER_GROUP:
         # Descriptive only: breakpoints use the whole sample, so this table
@@ -101,8 +104,11 @@ def run(ctx: Context) -> Dict[str, Any]:
         for q, group in usable.groupby(quintile):
             result["exploratory"].append({
                 "test": f"CAR(0,+5), sentiment quintile {int(q) + 1} (full-sample breakpoints)",
-                **mean_test(group["car_p0_p5"], group["day0"])})
-    alt = coefficient(regress(usable, "signed_drift_mar", xs, ["day0"]), "small")
+                **mean_test(group["car_p0_p5"], group["day0"], group["ticker"])})
+    result["sensitivity"].append({
+        "variant": "clustering by day 0 only",
+        **coefficient(regress(usable, "signed_drift", xs, ["day0"]), "small")})
+    alt = coefficient(regress(usable, "signed_drift_mar", xs, TWO_WAY), "small")
     result["sensitivity"].append({"variant": "market-adjusted drift", **alt})
     for name, mask in (("positive events", usable["direction"] > 0),
                        ("negative events", usable["direction"] < 0)):
@@ -110,16 +116,22 @@ def run(ctx: Context) -> Dict[str, Any]:
         if part.groupby("tercile").size().reindex(["small", "large"]).fillna(0).min() \
                 >= MIN_EVENTS_PER_GROUP:
             result["sensitivity"].append(
-                {"variant": name, **coefficient(regress(part, "signed_drift", xs, ["day0"]), "small")})
+                {"variant": name, **coefficient(regress(part, "signed_drift", xs, TWO_WAY), "small")})
 
-    # An executable version: enter at the close of day +1, exit at the close of
-    # day +5, in the direction of the news. Closing-auction fills are assumed.
-    small_cap = usable[usable["tercile"] == "small"]
+    # An executable version, long only: after positive news on a small cap, buy
+    # at the close of day +1 and sell at the close of day +5, hedged with the
+    # index. The mirror trade after negative news needs a short sale in a small
+    # cap, which is not assumed to be available.
+    longs = usable[(usable["tercile"] == "small") & (usable["direction"] > 0)]
     result["execution"] = {
-        "strategy": "small caps: trade in the sentiment direction from the close "
-                    "of day +1 to the close of day +5, hedged with the index",
-        "assumption": "fills at the closing auction on both days; not verified",
-        **costs.net_summary(small_cap["signed_drift_mar"].tolist()),
+        "strategy": "small caps, positive news only: buy at the close of day +1, "
+                    "sell at the close of day +5, hedged with the index",
+        "assumption": "fills at the closing auction on both days; an index hedge "
+                      "is available; neither is verified",
+        "not_assumed": "short sales after negative news",
+        "coverage": {"small_cap_events": int((usable["tercile"] == "small").sum()),
+                     "long_signals": int(len(longs))},
+        **costs.net_summary(longs["mar_p2_p5"].tolist(), round_trips=2),
     }
     result["tables"]["by_tercile"] = by_tercile.reset_index().to_dict("records")
     result["limitations"].append(

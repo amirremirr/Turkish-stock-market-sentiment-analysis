@@ -12,7 +12,7 @@ from stock_research.config import MIN_EVENT_DATES_PER_GROUP, MIN_EVENTS_PER_GROU
 from stock_research.eventstudy import STATUS_OK
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
-    Context, Spec, base_result, coefficient, insufficient, mean_test,
+    TWO_WAY, Context, Spec, base_result, coefficient, insufficient, mean_test,
     missing_requirements, primary_block, regress,
 )
 
@@ -41,12 +41,16 @@ SPEC = Spec(
     material_effect=0.005,
     benchmark="market model on XU100",
     controls=("prior_ret_5", "volatility_20", "log_turnover_20", "market_ret_0"),
-    inference="OLS, standard errors clustered by day 0",
+    inference="OLS, standard errors clustered two ways, by day 0 and by issuer "
+              "(a stock can close limit-down on consecutive sessions)",
     sufficiency={"min_events_per_group": MIN_EVENTS_PER_GROUP,
                  "min_event_dates": 2 * MIN_EVENT_DATES_PER_GROUP},
     requires=("news_events", "complete_company_news"),
-    sensitivity=("sessions at one price all day only", "CAR(+1,+1)"),
+    sensitivity=("sessions at one price all day only", "CAR(+1,+1)",
+                 "clustering by day 0 only"),
     execution_dependent=True,
+    parameters={"negative_sentiment_threshold": NEGATIVE, "windows": [list(w) for w in WINDOWS],
+                "limit_definition": "close locked at the lower limit (limits.detect)"},
 )
 
 
@@ -115,7 +119,7 @@ def run(ctx: Context) -> Dict[str, Any]:
     result["sufficiency"]["counts"] = counts
 
     xs = ["no_news", "prior_ret_5", "volatility_20", "log_turnover_20", "market_ret_0"]
-    fit = regress(usable, "car_p1_p3", xs, ["day0"])
+    fit = regress(usable, "car_p1_p3", xs, TWO_WAY)
     main = coefficient(fit, "no_news")
     result["primary"] = primary_block(
         SPEC, estimate=main["estimate"], se=main["se"], ci=main["ci"], p=main["p"],
@@ -124,13 +128,16 @@ def run(ctx: Context) -> Dict[str, Any]:
         extra={"n_dropped_missing": fit.get("n_dropped_missing")})
     for group, part in usable.groupby("news"):
         result["exploratory"].append({"test": f"mean CAR(+1,+3), {group}",
-                                      **mean_test(part["car_p1_p3"], part["day0"])})
+                                      **mean_test(part["car_p1_p3"], part["day0"], part["ticker"])})
     result["sensitivity"].append({
         "variant": "one price all day",
-        **coefficient(regress(usable[usable["one_price"].astype(bool)], "car_p1_p3", xs, ["day0"]), "no_news")})
+        **coefficient(regress(usable[usable["one_price"].astype(bool)], "car_p1_p3", xs, TWO_WAY), "no_news")})
     result["sensitivity"].append({
         "variant": "CAR(+1,+1)",
-        **coefficient(regress(usable, "car_p1_p1", xs, ["day0"]), "no_news")})
+        **coefficient(regress(usable, "car_p1_p1", xs, TWO_WAY), "no_news")})
+    result["sensitivity"].append({
+        "variant": "clustering by day 0 only",
+        **coefficient(regress(usable, "car_p1_p3", xs, ["day0"]), "no_news")})
 
     # The statistic above starts at the locked close. Whether an order there
     # would have traded cannot be seen in daily bars, so the executable version
@@ -157,7 +164,7 @@ def run(ctx: Context) -> Dict[str, Any]:
                       "entry fills at the next opening print where it was not locked",
         "coverage": {"signals": int(len(quiet)), "entry_fills": fills},
         "verified": False,
-        **costs.net_summary(trades),
+        **costs.net_summary(trades, round_trips=2),
     }
     result["limitations"] += [
         "No order-book data: fills at or near a price limit are unverified.",

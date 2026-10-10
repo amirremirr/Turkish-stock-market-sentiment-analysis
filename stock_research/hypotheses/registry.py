@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from stock_research import config, costs, entities, events, eventstudy, insider, limits, stats, store
@@ -20,6 +21,11 @@ from stock_research.hypotheses import common, h1, h2, h3, h4, h5, h6, h7, h8, h9
 from stock_research.hypotheses.common import Context
 
 PROTOCOL_VERSION = "stock-research-protocol-v1"
+
+#: Files that cannot change a registered result: fixtures and the report
+#: renderer only display, the CLI only dispatches, and the ingester only
+#: fetches. Everything else under stock_research/ is fingerprinted.
+_NOT_RESULT_BEARING = {"fixtures.py", "reporting.py", "cli.py", "data/kap.py"}
 
 MODULES = (h1, h2, h3, h4, h5, h6, h7, h8, h9)
 SPECS = {module.SPEC.id: module.SPEC for module in MODULES}
@@ -38,9 +44,29 @@ VERDICT_RULE = (
 )
 
 
+def code_fingerprint() -> Dict[str, str]:
+    """SHA-256 of every source file that can change a result.
+
+    Constants and specifications are hashed directly, but a rule can also
+    change inside a function body. Line endings are normalised first, so the
+    fingerprint is the same on a Windows and a Unix checkout.
+    """
+
+    root = Path(config.__file__).resolve().parent
+    out = {}
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root).as_posix()
+        if relative in _NOT_RESULT_BEARING:
+            continue
+        text = path.read_bytes().replace(b"\r\n", b"\n")
+        out[relative] = hashlib.sha256(text).hexdigest()
+    return out
+
+
 def protocol_document() -> Dict[str, Any]:
     return {
         "protocol_version": PROTOCOL_VERSION,
+        "code_fingerprint": code_fingerprint(),
         "family_size": common.FAMILY_SIZE,
         "alpha": config.ALPHA,
         "verdict_rule": VERDICT_RULE,
@@ -68,6 +94,8 @@ def protocol_document() -> Dict[str, Any]:
             "min_event_dates_per_group": config.MIN_EVENT_DATES_PER_GROUP,
             "min_clusters_for_inference": stats.MIN_CLUSTERS,
             "jump_threshold": prices.JUMP_THRESHOLD,
+            "cancelled_sessions": prices.CANCELLED_SESSIONS,
+            "calendar_gap_share": prices.CALENDAR_GAP_SHARE,
             "limit_rules": limits.LIMIT_RULES,
             "limit_tolerance": limits.TOLERANCE,
             "round_trip_cost_scenarios": list(config.ROUND_TRIP_COST_SCENARIOS),

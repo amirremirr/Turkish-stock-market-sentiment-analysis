@@ -45,7 +45,11 @@ SPEC = Spec(
     sufficiency={"min_events": MIN_EVENTS, "min_event_dates": MIN_DATES},
     requires=("news_events",),
     sensitivity=("excluding the smallest third of absolute gaps",
-                 "sentiment-aligned gaps only"),
+                 "sentiment-aligned gaps only",
+                 "two-way clustering by day 0 and issuer"),
+    parameters={"min_events": MIN_EVENTS, "min_dates": MIN_DATES,
+                "limit_open_threshold": LIMIT_OPEN,
+                "buckets": ["post_close", "weekend_or_holiday"]},
 )
 
 
@@ -129,17 +133,26 @@ def run(ctx: Context) -> Dict[str, Any]:
         "variant": "gap in the direction of sentiment",
         **coefficient(regress(aligned, "intraday", xs, ["day0"]), "gap")})
 
+    result["sensitivity"].append({
+        "variant": "two-way clustering (date, issuer)",
+        **coefficient(regress(usable, "intraday", xs, ["day0", "ticker"]), "gap")})
+
     # Statistical continuation is not tradable continuation. The executable
-    # version buys or sells at the open in the gap's direction, hedges with the
-    # index, and exits at the close -- where an opening fill was plausible.
-    filled = usable[usable["fill"] == costs.FILL_OK]
-    signed = np.sign(filled["gap"]) * (filled["intraday"] - filled["market_intraday"])
+    # version is long only: after an upward gap, buy at the open, sell at the
+    # close, hedged with the index -- and only where an opening fill was
+    # plausible. Selling short after a downward gap is not assumed possible.
+    upward = usable[usable["gap"] > 0]
+    filled = upward[upward["fill"] == costs.FILL_OK]
     result["execution"] = {
-        "strategy": "trade in the gap's direction from the open to the close of "
+        "strategy": "after an upward gap: buy at the open, sell at the close of "
                     "day 0, hedged with the index",
-        "assumption": "fills at the opening print; short sales assumed possible",
-        "coverage": {"usable_events": int(len(usable)), "filled": int(len(filled))},
-        **costs.net_summary(signed.tolist()),
+        "assumption": "fills at the opening print; an index hedge is available; "
+                      "neither is verified",
+        "not_assumed": "short sales after a downward gap",
+        "coverage": {"usable_events": int(len(usable)), "upward_gaps": int(len(upward)),
+                     "filled": int(len(filled))},
+        **costs.net_summary((filled["intraday"] - filled["market_intraday"]).tolist(),
+                            round_trips=2),
     }
     result["limitations"].append(
         "Daily bars cannot show whether the opening print was reachable in size.")

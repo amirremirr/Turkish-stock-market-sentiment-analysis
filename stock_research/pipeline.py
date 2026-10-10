@@ -173,8 +173,13 @@ def real_context(db_path=None, *, snapshot_id: Optional[str] = None,
         sealed=guards.sealed_from(index_db),
         frame_complete=bool(progress["frame_complete"]),
     )
+    with store.connect(db_path) as con:
+        unavailable = con.execute(
+            "SELECT COUNT(*) FROM sr_raw_kap_detail d JOIN sr_raw_kap_listing l "
+            "USING (disclosure_index) WHERE l.frame_version = ? AND d.published_raw IS NULL",
+            (KAP_FRAME_VERSION,)).fetchone()[0]
     meta = {"snapshot_id": snapshot_id, "frame": progress, "news": news,
-            "details": int(len(details))}
+            "details": int(len(details)), "details_unavailable": int(unavailable)}
     return ctx, meta
 
 
@@ -209,6 +214,7 @@ def describe(ctx: Context, meta: Dict[str, Any]) -> Dict[str, Any]:
         "tickers_with_bars": len(ctx.panel.bars) - 1,
         "tickers_with_price_issues": len(ctx.panel.issues),
         "kap_events": int(len(events_table)), "news": meta["news"],
+        "kap_details_the_gateway_could_not_serve": meta.get("details_unavailable", 0),
         "availability": ctx.availability,
         "price_issues": _issue_counts(ctx),
         "calendar_gaps": ctx.panel.calendar_gaps,

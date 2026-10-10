@@ -9,8 +9,8 @@ import pandas as pd
 
 from stock_research import limits, stats
 from stock_research.hypotheses.common import (
-    Context, Spec, base_result, insufficient, missing_requirements, primary_block,
-    prior_features,
+    Context, Spec, base_result, chronological_split, insufficient,
+    missing_requirements, primary_block, prior_features,
 )
 
 MIN_AT_RISK = 300
@@ -47,11 +47,19 @@ SPEC = Spec(
               "20-session volatility",
     controls=tuple(BASELINE + MARKET_STATE),
     inference="logistic regression with a small ridge penalty; first 70% of "
-              "dates train, last 30% test; loss differences clustered by date",
+              "dates train, last 30% test, with the last training session before "
+              "the test period dropped because its outcome is not yet known; "
+              "loss differences clustered two ways, by date and by issuer",
     sufficiency={"min_at_risk": MIN_AT_RISK, "min_per_outcome": MIN_PER_OUTCOME,
                  "min_test_dates": MIN_TEST_DATES},
     requires=("news_events", "complete_company_news"),
-    sensitivity=("Brier score difference", "volume and turnover features without news"),
+    sensitivity=("Brier score difference", "volume and turnover features without news",
+                 "clustering by date only"),
+    parameters={"min_at_risk": MIN_AT_RISK, "min_per_outcome": MIN_PER_OUTCOME,
+                "min_test_dates": MIN_TEST_DATES, "train_share": TRAIN_SHARE,
+                "ridge": RIDGE, "embargo_sessions": 1, "baseline": BASELINE,
+                "news_features": NEWS, "market_state_features": MARKET_STATE,
+                "streak_definition": "consecutive closes locked at the upper limit"},
 )
 
 
@@ -201,16 +209,21 @@ def run(ctx: Context) -> Dict[str, Any]:
     complete = table.dropna(subset=BASELINE + NEWS + MARKET_STATE).sort_values("date") \
         if len(table) else table
     counts["complete_rows"] = int(len(complete))
-    dates = sorted(complete["date"].unique()) if len(complete) else []
-    cut = int(len(dates) * TRAIN_SHARE)
-    train = complete[complete["date"].isin(dates[:cut])] if len(complete) else complete
-    test = complete[complete["date"].isin(dates[cut:])] if len(complete) else complete
+    if len(complete):
+        # A streak session's outcome is the next session's close, so the last
+        # training session before the test period is not yet resolved when the
+        # first test forecast is made.
+        train, test, split = chronological_split(complete, "date", TRAIN_SHARE, 1,
+                                                 ctx.panel.calendar)
+        counts["split"] = split
+    else:
+        train = test = complete
     counts["test_dates"] = int(test["date"].nunique()) if len(test) else 0
     enough = (
         len(complete) >= MIN_AT_RISK
         and min(complete["ended"].sum(), (1 - complete["ended"]).sum()) >= MIN_PER_OUTCOME
         and counts["test_dates"] >= MIN_TEST_DATES
-        and 0 < train["ended"].mean() < 1
+        and len(train) > 0 and 0 < train["ended"].mean() < 1
     )
     if not enough:
         return insufficient(result, [
@@ -226,7 +239,7 @@ def run(ctx: Context) -> Dict[str, Any]:
         "baseline_plus_market_state": _oos(train, test, BASELINE + MARKET_STATE),
         "full": _oos(train, test, BASELINE + MARKET_STATE + NEWS),
     }
-    clusters = [test["date"].to_numpy()]
+    clusters = [test["date"].to_numpy(), test["ticker"].to_numpy()]
     difference = stats.cluster_mean(
         log_loss_each(y, predictions["baseline"]) - log_loss_each(y, predictions["baseline_plus_news"]),
         clusters)
@@ -253,6 +266,11 @@ def run(ctx: Context) -> Dict[str, Any]:
         "variant": "log loss, market-state model minus full model",
         **stats.cluster_mean(log_loss_each(y, predictions["baseline_plus_market_state"])
                              - log_loss_each(y, predictions["full"]), clusters)})
+    result["sensitivity"].append({
+        "variant": "log loss, baseline minus baseline-plus-news, clustering by date only",
+        **stats.cluster_mean(
+            log_loss_each(y, predictions["baseline"])
+            - log_loss_each(y, predictions["baseline_plus_news"]), clusters[:1])})
     result["limitations"] += [
         "A streak day followed by a missing session is censored, which removes "
         "halted stocks; halts are not random.",

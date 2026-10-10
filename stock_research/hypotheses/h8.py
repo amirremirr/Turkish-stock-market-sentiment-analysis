@@ -9,7 +9,7 @@ import pandas as pd
 
 from stock_research import costs
 from stock_research.config import MIN_EVENT_DATES_PER_GROUP, MIN_EVENTS_PER_GROUP
-from stock_research.eventstudy import STATUS_OK, event_time_path, flag_overlaps
+from stock_research.eventstudy import STATUS_OK, event_time_path, non_overlapping
 from stock_research.events import INSIDER_TRADE
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
@@ -43,13 +43,20 @@ SPEC = Spec(
     material_effect=0.01,
     benchmark="market model on XU100, estimation window -130..-11",
     controls=("prior_ret_5", "log_turnover_20", "volatility_20 (in the intensity regression)"),
-    inference="mean with standard errors clustered by day 0",
+    inference="mean with standard errors clustered two ways, by day 0 and by "
+              "issuer: a holder often buys on many consecutive days, and those "
+              "20-session windows share most of their returns",
     sufficiency={"min_events": MIN_EVENTS_PER_GROUP,
                  "min_event_dates": MIN_EVENT_DATES_PER_GROUP},
     requires=("kap_events",),
-    sensitivity=("CAR(0,+20) including the first reaction", "two-way clustering",
-                 "no earlier purchase by the same issuer within 20 sessions",
+    sensitivity=("CAR(0,+20) including the first reaction",
+                 "one purchase per issuer per 21 sessions",
+                 "clustering by day 0 only",
                  "small versus large companies (needs point-in-time market cap)"),
+    parameters={"windows": [list(w) for w in WINDOWS], "primary_window": [1, 20],
+                "side": "buy only; a ticker-day with any sale is excluded",
+                "kinds": "holder trading another issuer, or issuer reporting a holder; "
+                         "an issuer trading its own shares is a buyback"},
 )
 
 
@@ -104,25 +111,29 @@ def run(ctx: Context) -> Dict[str, Any]:
             f"needs {MIN_EVENTS_PER_GROUP} on {MIN_EVENT_DATES_PER_GROUP}"], counts)
     result["sufficiency"]["counts"] = counts
 
-    main = mean_test(usable["car_p1_p20"], usable["day0"])
+    main = mean_test(usable["car_p1_p20"], usable["day0"], usable["ticker"])
+    counts["distinct_issuers"] = int(usable["ticker"].nunique())
     result["primary"] = primary_block(
         SPEC, estimate=main["mean"], se=main["se"], ci=main["ci"], p=main["p"],
         n=main["n"], clusters=main["clusters"], inference_status=main["status"])
 
     for label, column in (("CAR(0,0)", "car_p0_p0"), ("CAR(+1,+5)", "car_p1_p5"),
                           ("CAR(+1,+10)", "car_p1_p10")):
-        result["exploratory"].append({"test": f"mean {label}",
-                                      **mean_test(usable[column], usable["day0"])})
+        result["exploratory"].append({
+            "test": f"mean {label}",
+            **mean_test(usable[column], usable["day0"], usable["ticker"])})
 
-    result["sensitivity"].append({"variant": "CAR(0,+20), including the first reaction",
-                                  **mean_test(usable["car_p0_p20"], usable["day0"])})
     result["sensitivity"].append({
-        "variant": "two-way clustering (date, issuer)",
-        **coefficient(regress(usable.assign(one=1.0), "car_p1_p20", [], ["day0", "ticker"]), "const")})
-    alone = usable[~flag_overlaps(usable, 20, ctx.panel.calendar)]
+        "variant": "CAR(0,+20), including the first reaction",
+        **mean_test(usable["car_p0_p20"], usable["day0"], usable["ticker"])})
+    spaced = usable[non_overlapping(usable, 20, ctx.panel.calendar)]
     result["sensitivity"].append({
-        "variant": "no earlier purchase by the same issuer within 20 sessions",
-        **mean_test(alone["car_p1_p20"], alone["day0"])})
+        "variant": "one purchase per issuer per 21 sessions (no overlapping windows)",
+        "n_kept": int(len(spaced)),
+        **mean_test(spaced["car_p1_p20"], spaced["day0"])})
+    result["sensitivity"].append({
+        "variant": "clustering by day 0 only (overstates precision when windows overlap)",
+        **mean_test(usable["car_p1_p20"], usable["day0"])})
     result["sensitivity"].append({
         "variant": "small versus large companies", "status": "blocked",
         "reason": ctx.available("point_in_time_market_cap")[1]})
@@ -131,7 +142,7 @@ def run(ctx: Context) -> Dict[str, Any]:
     if len(sized) >= MIN_EVENTS_PER_GROUP:
         sized["log_intensity"] = np.log(sized["insider_value"]) - sized["log_turnover_20"]
         fit = regress(sized, "car_p1_p20",
-                      ["log_intensity", "prior_ret_5", "volatility_20"], ["day0"])
+                      ["log_intensity", "prior_ret_5", "volatility_20"], ["day0", "ticker"])
         result["exploratory"].append({
             "test": "purchase intensity: log(value / mean daily turnover)",
             **coefficient(fit, "log_intensity"), "n": fit.get("n")})
@@ -141,12 +152,17 @@ def run(ctx: Context) -> Dict[str, Any]:
                                              sealed=ctx.sealed)}
     result["execution"] = {
         "strategy": "buy at the close of day 0 and hold 20 sessions, hedged with the index",
-        "assumption": "fills at the closing auction on entry and exit; not verified",
-        **costs.net_summary(usable["mar_p1_p20"].dropna().tolist()),
+        "assumption": "fills at the closing auction on entry and exit; an index "
+                      "hedge is available; neither is verified",
+        **costs.net_summary(usable["mar_p1_p20"].dropna().tolist(), round_trips=2),
     }
     result["limitations"] += [
         "Purchases are identified by a text parser over the form's labelled "
         "fields; notifications it cannot read are left out, not guessed.",
+        "A purchase is taken to be on-exchange unless the text says otherwise "
+        "(transfer, off-exchange, option, allotment). No field states the venue.",
+        "'Insider' here means anyone with a notification duty for the issuer's "
+        "shares: parents and large holders as well as directors.",
         "The filer's role is read from free text and is not verified.",
         "Twenty-session windows overlap for issuers with repeated purchases.",
         "Survivorship: issuers delisted since the roster snapshot are missing.",

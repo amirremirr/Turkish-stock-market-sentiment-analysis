@@ -10,8 +10,8 @@ import pandas as pd
 from stock_research.eventstudy import STATUS_OK
 from stock_research.hypotheses import prep
 from stock_research.hypotheses.common import (
-    Context, Spec, base_result, coefficient, insufficient, missing_requirements,
-    primary_block, regress,
+    TWO_WAY, Context, Spec, base_result, coefficient, insufficient,
+    missing_requirements, primary_block, regress,
 )
 
 LOOKBACK_SESSIONS = 60
@@ -39,12 +39,16 @@ SPEC = Spec(
     benchmark="market model on XU100",
     controls=("mean_sentiment", "prior_ret_5", "volatility_20", "log_turnover_20",
               "volume_ratio"),
-    inference="OLS, standard errors clustered by day 0",
+    inference="OLS, standard errors clustered two ways, by day 0 and by issuer "
+              "(ten-session windows of one issuer overlap)",
     sufficiency={"min_ticker_days": MIN_TICKER_DAYS, "min_dates": MIN_DATES,
                  "min_prior_coverage_days": MIN_COVERAGE_DAYS},
     requires=("news_events",),
-    sensitivity=("CAR(+1,+5) and CAR(+1,+20)", "two-way clustering by date and ticker",
+    sensitivity=("CAR(+2,+5) and CAR(+1,+20)", "clustering by day 0 only",
                  "excluding days with a KAP disclosure", "excluding scheduled macro days"),
+    parameters={"lookback_sessions": LOOKBACK_SESSIONS, "min_coverage_days": MIN_COVERAGE_DAYS,
+                "min_ticker_days": MIN_TICKER_DAYS, "min_dates": MIN_DATES,
+                "primary_window": [1, 10]},
 )
 
 
@@ -102,7 +106,7 @@ def run(ctx: Context) -> Dict[str, Any]:
 
     xs = ["abnormal_coverage", "mean_sentiment", "prior_ret_5", "volatility_20",
           "log_turnover_20", "volume_ratio"]
-    fit = regress(usable, "car_p1_p10", xs, ["day0"])
+    fit = regress(usable, "car_p1_p10", xs, TWO_WAY)
     main = coefficient(fit, "abnormal_coverage")
     result["primary"] = primary_block(
         SPEC, estimate=main["estimate"], se=main["se"], ci=main["ci"], p=main["p"],
@@ -117,10 +121,10 @@ def run(ctx: Context) -> Dict[str, Any]:
         for _, group in usable.dropna(subset=["car_p1_p10"]).groupby(bins, observed=True)]
     for label, column in (("CAR(+2,+5)", "car_p2_p5"), ("CAR(+1,+20)", "car_p1_p20")):
         result["sensitivity"].append({
-            "variant": label, **coefficient(regress(usable, column, xs, ["day0"]), "abnormal_coverage")})
+            "variant": label, **coefficient(regress(usable, column, xs, TWO_WAY), "abnormal_coverage")})
     result["sensitivity"].append({
-        "variant": "two-way clustering (date, ticker)",
-        **coefficient(regress(usable, "car_p1_p10", xs, ["day0", "ticker"]), "abnormal_coverage")})
+        "variant": "clustering by day 0 only",
+        **coefficient(regress(usable, "car_p1_p10", xs, ["day0"]), "abnormal_coverage")})
 
     if not ctx.kap_events.empty:
         disclosed = set(zip(ctx.kap_events["ticker"], ctx.kap_events["day0"]))
@@ -128,14 +132,14 @@ def run(ctx: Context) -> Dict[str, Any]:
         result["sensitivity"].append({
             "variant": "excluding ticker-days with a sampled KAP disclosure",
             "n_kept": int(len(quiet)),
-            **coefficient(regress(quiet, "car_p1_p10", xs, ["day0"]), "abnormal_coverage")})
+            **coefficient(regress(quiet, "car_p1_p10", xs, TWO_WAY), "abnormal_coverage")})
     from config import ECONOMIC_CALENDAR
     macro_days = set(ECONOMIC_CALENDAR)
     calm = usable[~usable["day0"].isin(macro_days)]
     result["sensitivity"].append({
         "variant": "excluding scheduled macro days (config.ECONOMIC_CALENDAR)",
         "n_kept": int(len(calm)),
-        **coefficient(regress(calm, "car_p1_p10", xs, ["day0"]), "abnormal_coverage")})
+        **coefficient(regress(calm, "car_p1_p10", xs, TWO_WAY), "abnormal_coverage")})
 
     result["limitations"] += [
         "Coverage is measured on the outlets this project scrapes, not on all media.",

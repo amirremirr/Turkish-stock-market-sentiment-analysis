@@ -77,6 +77,9 @@ class Spec:
     sensitivity: Tuple[str, ...] = ()
     execution_dependent: bool = False
     kind: str = "primary"
+    #: Every module-level constant the hypothesis uses. In the spec so that
+    #: changing one changes the protocol hash.
+    parameters: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -239,10 +242,52 @@ def coefficient(fit: Dict[str, Any], name: str) -> Dict[str, Any]:
     return out
 
 
-def mean_test(values: pd.Series, dates: pd.Series) -> Dict[str, Any]:
-    """Date-clustered mean of the non-missing values."""
+def mean_test(values: pd.Series, dates: pd.Series,
+              tickers: Optional[pd.Series] = None) -> Dict[str, Any]:
+    """Clustered mean of the non-missing values.
+
+    With *tickers*, clustering is two-way: by date and by issuer. That is the
+    form to use whenever one issuer can contribute several events whose
+    outcome windows overlap, because those outcomes share returns. Clustering
+    by date alone then rejects a true null about half the time (measured in
+    ``test_overlapping_windows_need_issuer_clustering``).
+    """
 
     keep = values.notna() & dates.notna()
-    result = stats.cluster_mean(values[keep].to_numpy(dtype=float), [dates[keep].to_numpy()])
+    clusters = [dates[keep].to_numpy()]
+    if tickers is not None:
+        keep = keep & tickers.notna()
+        clusters = [dates[keep].to_numpy(), tickers[keep].to_numpy()]
+    result = stats.cluster_mean(values[keep].to_numpy(dtype=float), clusters)
     result["dates"] = int(dates[keep].nunique())
+    result["clustering"] = "date and issuer" if tickers is not None else "date"
     return result
+
+
+#: Clustering used for a primary test whenever outcome windows can overlap.
+TWO_WAY = ["day0", "ticker"]
+
+
+def chronological_split(table: pd.DataFrame, date_column: str, train_share: float,
+                        embargo_sessions: int, calendar) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
+    """Train on the early dates, test on the late ones, with a gap between.
+
+    An event's outcome is not known on its day 0; it is known when its window
+    closes. A model fitted "as of" the first test date may therefore only use
+    training events whose windows had closed by then. ``embargo_sessions`` is
+    the length of the outcome window: training events within that many
+    sessions before the first test date are dropped.
+    """
+
+    dates = sorted(table[date_column].unique())
+    cut = int(len(dates) * train_share)
+    info = {"train_dates": cut, "test_dates": len(dates) - cut,
+            "embargo_sessions": embargo_sessions, "embargoed_rows": 0}
+    if cut == 0 or cut >= len(dates):
+        return table.iloc[0:0], table.iloc[0:0], info
+    first_test = calendar.index(dates[cut])
+    position = table[date_column].map(calendar.index)
+    is_test = table[date_column].isin(dates[cut:])
+    usable_train = ~is_test & (position <= first_test - 1 - embargo_sessions)
+    info["embargoed_rows"] = int((~is_test & ~usable_train).sum())
+    return table[usable_train], table[is_test], info

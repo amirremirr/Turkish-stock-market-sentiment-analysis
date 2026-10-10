@@ -39,7 +39,9 @@ SPEC = Spec(
               "earlier report",
     sufficiency={"min_matched_events": MIN_MATCHED, "min_dates": MIN_DATES},
     requires=("english_news", "news_events"),
-    sensitivity=("events at least one hour apart", "issuer events only"),
+    sensitivity=("events at least one hour apart",),
+    parameters={"match_window_hours": MATCH_WINDOW_HOURS, "min_matched": MIN_MATCHED,
+                "min_dates": MIN_DATES, "ties": "excluded"},
 )
 
 
