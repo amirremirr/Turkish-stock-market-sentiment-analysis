@@ -64,7 +64,6 @@ OTHER_FORM = "other_form"
 _SUBJECT_CATEGORIES_RAW: Dict[str, str] = {
     "yeni is iliskisi": NEW_CONTRACT,
     "paylarin geri alinmasina iliskin bildirim": BUYBACK,
-    "pay alim satim bildirimi": INSIDER_TRADE,
     "kar payi dagitim islemlerine iliskin bildirim": DIVIDEND,
     "finansal duran varlik edinimi": ASSET_ACQUISITION,
     "maddi duran varlik alimi": ASSET_ACQUISITION,
@@ -86,6 +85,7 @@ _SUBJECT_CATEGORIES_RAW: Dict[str, str] = {
 }
 SUBJECT_CATEGORIES: Dict[str, str] = {fold(k): v for k, v in _SUBJECT_CATEGORIES_RAW.items()}
 CAPITAL_FORM = fold("Sermaye Artırımı - Azaltımı İşlemlerine İlişkin Bildirim")
+SHARE_TRANSACTION_FORM = fold("Pay Alım Satım Bildirimi")
 GENERAL_FORM = fold("Özel Durum Açıklaması (Genel)")
 
 #: Phrases in the summary of a general-form disclosure. Checked in order.
@@ -115,12 +115,22 @@ def parse_flags(body: Optional[str]) -> Dict[str, Optional[bool]]:
     return out
 
 
-def classify(subject: Optional[str], summary: Optional[str], body: Optional[str]) -> Dict[str, str]:
+def classify(subject: Optional[str], summary: Optional[str], body: Optional[str],
+             sender: Sequence[str] = (), related: Sequence[str] = ()) -> Dict[str, str]:
     """Category and the rule that assigned it."""
 
     form = fold(subject)
     if not form:
         return {"category": OTHER_FORM, "rule": "no_subject"}
+    if form == SHARE_TRANSACTION_FORM:
+        # The same form carries a holder's trade in another issuer, an issuer
+        # reporting a holder's trade, and an issuer's own buyback.
+        from stock_research.insider import KIND_OWN_SHARES, transaction_kind
+
+        kind = transaction_kind(body, summary, sender, related)
+        if kind == KIND_OWN_SHARES:
+            return {"category": BUYBACK, "rule": "share_form_own_shares"}
+        return {"category": INSIDER_TRADE, "rule": f"share_form:{kind}"}
     if form in SUBJECT_CATEGORIES:
         return {"category": SUBJECT_CATEGORIES[form], "rule": "form_name"}
     if form == CAPITAL_FORM:
@@ -155,16 +165,28 @@ def sender_codes(raw: Optional[str]) -> List[str]:
     return [c for c in codes if isinstance(c, str) and re.fullmatch(r"[A-Z0-9]{3,6}", c)]
 
 
+def related_codes(raw: Optional[str]) -> List[str]:
+    """Codes in the form's "related companies" field (a list of {"code": ...})."""
+
+    try:
+        items = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    codes = [item.get("code") for item in items if isinstance(item, dict)]
+    return [c for c in codes if isinstance(c, str) and re.fullmatch(r"[A-Z0-9]{3,6}", c)]
+
+
 def candidate_symbols(db_path=None) -> List[str]:
     """Every sender code among sampled disclosures, as a provider symbol."""
 
     with store.connect(db_path) as con:
         rows = con.execute(
-            "SELECT DISTINCT d.sender_codes FROM sr_raw_kap_detail d "
+            "SELECT DISTINCT d.sender_codes, d.related_stocks FROM sr_raw_kap_detail d "
             "JOIN sr_raw_kap_listing l USING (disclosure_index) "
             "WHERE l.frame_version = ?", (KAP_FRAME_VERSION,),
         ).fetchall()
-    codes = sorted({code for row in rows for code in sender_codes(row[0])})
+    codes = sorted({code for row in rows
+                    for code in sender_codes(row[0]) + related_codes(row[1])})
     return [yahoo_symbol(code) for code in codes]
 
 
@@ -214,15 +236,27 @@ def build_kap_events(details: pd.DataFrame, panel) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
     for detail in details.to_dict("records"):
         action = panel.calendar.actionable(parse_kap_time(detail["published_raw"]))
-        label = classify(detail["subject_tr"], detail["summary_tr"], detail["body_text"])
         codes = sender_codes(detail["sender_codes"])
+        related = related_codes(detail["related_stocks"])
+        other = [c for c in related if c not in set(codes)]
+        label = classify(detail["subject_tr"], detail["summary_tr"], detail["body_text"],
+                         codes, related)
+        # Whose stock the event is about. Normally the filer's. On a share
+        # transaction filed by a holder it is the related company's, and if
+        # the form names more than one the target is not knowable.
+        if label["category"] == INSIDER_TRADE and other:
+            target = other if len(other) == 1 else []
+        else:
+            target = codes
         row = {
             "event_id": f"kap:{detail['disclosure_index']}",
             "disclosure_index": int(detail["disclosure_index"]),
             "sender_id": detail["sender_id"],
             "sender_title": detail["sender_title"],
             "sender_codes": codes,
-            "ticker": primary_symbol(codes, panel, action.day0),
+            "related_codes": related,
+            "names_other_issuer": bool(other),
+            "ticker": primary_symbol(target, panel, action.day0),
             "published_local": action.published_local,
             "published_utc": action.published_utc,
             "day0": action.day0,
@@ -238,6 +272,6 @@ def build_kap_events(details: pd.DataFrame, panel) -> pd.DataFrame:
             "source": detail["source"],
         }
         if row["category"] == INSIDER_TRADE:
-            row.update(parse_insider(detail["body_text"]))
+            row.update(parse_insider(detail["body_text"], detail["summary_tr"], codes, related))
         rows.append(row)
     return pd.DataFrame(rows)
