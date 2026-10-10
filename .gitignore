@@ -62,3 +62,8 @@ _av_search.py
 _fix_encoding.py
 other_headlines.txt
 candidate_feeds.txt
+
+# Stock-level study database: licensed raw KAP and price data, never committed
+stock_research.db
+stock_research.db-*
+stock_research_ingest.*
