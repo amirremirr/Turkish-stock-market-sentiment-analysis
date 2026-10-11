@@ -25,6 +25,9 @@ About 3,400 disclosures at 80 anchors across 2023. Consequences:
   market closure, an election and a sharp fall in the lira. Nothing here
   generalises beyond it without more years.
 - A sample cannot establish the absence of news, which blocks H5 and H6.
+- A disclosure the gateway refuses to serve is missing from the sample. Up to
+  1% may be missing; each is named in the run's manifest. The tolerance assumes
+  a refusal has nothing to do with what the disclosure says.
 - Each anchor covers about a day of filings, so events cluster on roughly 80
   to 100 dates. That is the effective sample size for anything market-wide.
 
@@ -68,8 +71,11 @@ and are not in the sample at all.
 
 - "Insider" means anyone with a duty to notify trades in the issuer's shares:
   parents and large holders as well as directors.
-- A purchase is taken to be on-exchange unless the text says otherwise. No
-  field states the venue.
+- No field states where a trade was executed. A purchase counts only if its
+  free text names the exchange as the place of the trade. The common template
+  gives a price range and no venue, so most purchases are "venue unknown" and
+  outside the primary sample. What remains may not represent on-exchange
+  purchases in general, and is probably too small to test.
 - The parser was written against five real forms and synthetic variants. A
   form whose table is empty (details in an attachment) is left unparsed.
 - Transaction value is nominal bought times the midpoint of the disclosed

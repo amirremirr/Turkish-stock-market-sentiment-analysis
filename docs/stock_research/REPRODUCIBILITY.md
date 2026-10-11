@@ -35,7 +35,7 @@ python -m stock_research.cli report           # HTML report from the latest stor
 python -m stock_research.cli demo             # every hypothesis on synthetic data
 python -m stock_research.cli evaluate-linker  # entity linker on the labelled set
 python -m stock_research.registry_doc         # regenerate HYPOTHESIS_REGISTRY.md
-python -m pytest tests/stock_research         # 100 tests, no network, about two minutes
+python -m pytest tests/stock_research         # 119 tests, no network, about two minutes
 ```
 
 `run` exits with status 3 and prints why if the protocol is not registered
@@ -47,7 +47,7 @@ summary CSV and the full results as JSON.
 ## To reproduce a real-data run from nothing
 
 ```bash
-python -m stock_research.cli ingest-kap       # until status shows frame_complete: true
+python -m stock_research.cli ingest-kap       # until status shows ingestion_complete: true
 python -m stock_research.cli ingest-prices
 python -m stock_research.cli describe
 python -m stock_research.cli register
@@ -81,6 +81,8 @@ Every stored run has a manifest:
 | `bootstrap_seed` | Fixed seed for resampling |
 | `sealed_from` | First session the sealed index test forbids, or null |
 | `availability` | What each dataset could support, with reasons |
+| `kap_sample` | Targets, details stored, details unavailable, and the index of each missing disclosure |
+| `provenance` | SHA-256 digests of the KAP sample, the price snapshot and the roster; refused-request count; ingestion log |
 | `sample` | Counts and data diagnostics at run time |
 | `manifest_hash` | SHA-256 of all the above |
 

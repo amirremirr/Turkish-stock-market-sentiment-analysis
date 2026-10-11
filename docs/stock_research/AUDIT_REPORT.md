@@ -303,3 +303,101 @@ this session: `YahooProvider.fetch` and the KAP client (`data/kap.py::api_get`).
 - The size of survivorship bias. Delisted companies are absent from both the
   roster and the price provider, and how many is not known.
 - Anything about H9. There is no English news stream.
+
+## Follow-up review, 2026-10-11 (protocol v2)
+
+A source review after the first audit raised three issues. All three were
+confirmed against the code, reproduced by tests that failed on it, and fixed
+on the branch `audit/stock-research-hardening`. No real outcome had been
+computed under protocol v1, and none was computed for this review.
+
+Because two of the fixes change what the registered run would compute, they
+are a **new protocol version**, not an edit: v1 (`92366aa0…`, commit
+`ecdc532`) stays registered and untouched; v2 is `09e9382e77ec44bc…`.
+
+### F1. The protocol fingerprint left out the ingester (high)
+
+- **Where:** `hypotheses/registry.py` (`_NOT_RESULT_BEARING`).
+- **Confirmed:** `data/kap.py` was excluded as "only fetches". It also decides
+  which disclosures are in the sample (`is_target`, the listed-company
+  filter, whose constant was not in the protocol either) and what text the
+  taxonomy and the insider parser read (`body_text`). A change there could
+  alter the sample with the protocol hash unchanged.
+- **Test:** `test_hardening.py::test_protocol_fingerprint_covers_the_ingester`.
+- **Fix:** the ingester is fingerprinted; `listed_member_mark`,
+  `max_detail_attempts` and `max_unavailable_share` are protocol constants.
+  Each ingestion run now logs the SHA-256 of the ingester's own source
+  (`sr_ingest_log`).
+
+### F2. An anchor was marked complete with a disclosure detail missing (high)
+
+- **Where:** `data/kap.py` (`run`, `progress`), `pipeline.py` (`run_real`).
+- **Confirmed:** when the gateway refused a detail request the ingester stored
+  a placeholder row with no timestamp and marked the anchor `complete`. The
+  event table dropped the placeholder silently, `frame_complete` was true, and
+  the run would have proceeded on a sample with a hole it did not report as a
+  condition. Because the raw table is append-only, the placeholder also made
+  the disclosure impossible to fetch later.
+- **Tests:** `::test_an_anchor_with_an_unavailable_detail_is_not_complete`,
+  `::test_ingestion_complete_and_details_complete_are_reported_separately`,
+  `::test_a_later_run_fills_the_gap_and_gives_up_after_three_attempts`,
+  `::test_a_placeholder_row_from_the_old_ingester_counts_as_unavailable`,
+  `::test_real_run_tolerates_a_small_recorded_gap_and_refuses_a_large_one`.
+- **Fix:** two kinds of completeness. *Ingestion* is complete when every
+  anchor has been listed and every target asked for. *Details* are complete
+  when every request was answered. A refused request is logged in
+  `sr_kap_detail_failures`, gets no row in the raw table, leaves its anchor
+  `incomplete_details`, and is asked for again on later runs, three times at
+  most. The real-data run needs ingestion complete and at most 1% of sampled
+  disclosures unavailable; within that it proceeds and the manifest lists
+  each missing disclosure, above it the run refuses.
+- **In the data so far:** no refused request and no placeholder row
+  (checked at 10 of 80 anchors).
+
+### F3. H8 assumed a purchase was on-exchange unless told otherwise (high)
+
+- **Where:** `insider.py` (`execution_venue`), `hypotheses/h8.py` (`prepare`).
+- **Confirmed:** the parser recorded whether a venue was mentioned and H8
+  never used it. Every parsed purchase not flagged as a transfer was treated
+  as an open-market purchase.
+- **Tests:** `::test_venue_is_on_exchange_only_when_the_text_says_so`,
+  `::test_off_exchange_trades_are_excluded_whatever_else_the_text_says`,
+  `::test_h8_primary_sample_is_venue_confirmed_purchases_only`,
+  `::test_h8_is_insufficient_when_no_purchase_has_a_confirmed_venue`.
+- **Fix:** venue is `on_exchange`, `off_exchange` or `unknown`.
+  `on_exchange` needs the text to name the exchange as where the trade was
+  made, near a word for the trade; naming it as where the shares are listed
+  does not count. H8's primary sample is venue-confirmed purchases only.
+  Purchases with no stated venue are a sensitivity analysis.
+- **Consequence, stated plainly:** the common form template gives a price
+  range and no venue. Of the three real purchase forms seen so far, none
+  states a venue. H8 will very probably report `data_insufficient`.
+
+### Provenance added with these fixes
+
+Every stored run now records, under `provenance` in its manifest, SHA-256
+digests of the KAP sample, the price snapshot and the member roster it read
+(content only, fixed order), the count of refused detail requests, and the
+ingestion log. A snapshot id names a set of rows; a digest shows they are the
+same rows.
+
+The ingestion that began before this logging existed is recorded by an
+`attested` log entry: the ingester file on disk was last modified nine seconds
+before that process started and has matched its committed version since, so
+the hash of that version is entered as the code that fetched those rows. It
+is an attestation from file times, not a measurement by the process itself.
+
+### Tests after the follow-up
+
+`python -m pytest`: **759 passed**, 0 failed. 119 are in
+`tests/stock_research/`, 19 of them new in `test_hardening.py`.
+
+### Still not addressed
+
+- A disclosure the old ingester turned into a placeholder cannot be
+  re-fetched into the append-only raw table. There are none at present.
+- Venue is read from free text by pattern. A form that states the venue in
+  words the patterns do not cover is `unknown`, which is the safe direction
+  but shrinks the sample.
+- The 1% tolerance for unavailable details is a judgement, not a derivation.
+  It assumes a refused request is unrelated to what the disclosure says.

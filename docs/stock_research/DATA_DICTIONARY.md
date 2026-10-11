@@ -53,10 +53,23 @@ dividend-adjusted.
 One row per requested symbol and snapshot: `status` is `ok`, `no_data` or
 `error`. A symbol the provider could not serve is recorded, not skipped.
 
+### `sr_kap_detail_failures`
+One row per refused request for a disclosure detail: `disclosure_index`,
+`block_seq`, `http_status`, `error`, `attempted_at`. Append-only. A disclosure
+with rows here and none in `sr_raw_kap_detail` is a gap in the sample.
+
+### `sr_ingest_log`
+A `start` and a `finish` row per ingestion run: `run_id`, `at`,
+`frame_version`, `ingester_sha256` (the ingester's own source), `code_commit`,
+`detail_json`. Append-only. An `attested` row records a run made before this
+logging existed.
+
 ## Bookkeeping
 
-- `sr_kap_frame`: progress of each anchor (`pending`, `listed`, `complete`).
-  Mutable.
+- `sr_kap_frame`: progress of each anchor. Mutable. `pending` (not listed),
+  `listed` (targets known, details in progress), `complete` (every target
+  detail stored), `incomplete_details` (every target asked for, at least one
+  refused).
 - `sr_protocols`: registered protocol documents by hash.
 - `sr_manifests`: what each stored run was computed from.
 - `sr_results`: one row per manifest and hypothesis, with the full result JSON.
@@ -93,7 +106,7 @@ Built by `events.py::build_kap_events`, one row per sampled disclosure.
 | `timing_ambiguous` | Afternoon of a possible half day, or outside the calendar |
 | `category`, `category_rule` | Taxonomy category and the rule that assigned it |
 | `is_update`, `is_correction`, `is_delayed` | The form's own flags; null if the form has none |
-| `insider_*` | Share-transaction fields: `parse_status`, `kind`, `side`, `buy_nominal`, `sell_nominal`, `price_mid`, `value`, `role`, `exclusion` |
+| `insider_*` | Share-transaction fields: `parse_status`, `kind`, `side`, `buy_nominal`, `sell_nominal`, `price_mid`, `value`, `role`, `exclusion`, `venue` (`on_exchange`, `off_exchange`, `unknown`), `venue_evidence` (the text that showed it) |
 
 ## News events (input to H1–H6, H9)
 

@@ -15,7 +15,7 @@ REFUSED  KAP sample frame is incomplete (8 of 80 anchors); no outcome is read on
 
 | | |
 |---|---|
-| Protocol | `92366aa0a6342e9c…`, registered 2026-10-11T00:15:04Z |
+| Protocol | v2, `09e9382e77ec44bc…`, registered 2026-10-11T08:39:14Z (v1, `92366aa0a6342e9c…`, is superseded and has no results) |
 | Sample frame | `kap-anchor-sample-v2`, 80 anchors across 2023 |
 | Ingested so far | 8 anchors, 382 disclosure details |
 | Remaining | about 10 hours at 6 calls a minute |
@@ -69,11 +69,13 @@ sessions is rough:
   and the general category will pass the 30-events-on-15-dates rule easily;
   new contracts and dividends probably will; bonus issues, rights issues and
   asset transactions probably will not, and will be reported as too thin.
-- **H8 will probably be `data_insufficient`.** Four share-transaction forms in
-  351 disclosures projects to about 40 in the full sample. Of the five seen
-  across all ingestion so far, two are purchases by a holder, one is a sale,
-  one is a company's own buyback and one has an empty table. Around 15 to 20
-  purchase days is below the 30 the rule needs.
+- **H8 will very probably be `data_insufficient`.** Four share-transaction
+  forms in 351 disclosures projects to about 40 in the full sample. Of the
+  five seen so far, two are purchases by a holder, one is a sale, one is a
+  company's own buyback and one has an empty table. Under protocol v2 a
+  purchase counts only if its text states the trade was made on the exchange,
+  and neither purchase does: both use the template that gives a price range
+  and no venue.
 - The buyback count is high because one anchor falls on 2023-02-16, the day
   after the market reopened from the earthquake closure, when the withholding
   tax on buybacks had just been suspended. Those events share a date and a

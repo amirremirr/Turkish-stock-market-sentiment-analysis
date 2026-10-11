@@ -67,8 +67,13 @@ rule that built it.
    specifications, every rule version and constant, and a SHA-256 of each
    result-bearing source file. Change a line of an estimator and the run
    refuses until the new protocol is registered.
-2. **No partial sample.** `run_real` refuses while the KAP sample frame is
-   incomplete. There is no flag for an interim look.
+2. **No partial sample.** `run_real` refuses until every anchor of the KAP
+   sample has been attempted, and refuses if more than 1% of sampled
+   disclosures could not be fetched. There is no flag for an interim look.
+
+The fingerprint leaves out only the files that display or dispatch
+(`fixtures.py`, `reporting.py`, `cli.py`, `registry_doc.py`). The ingester is
+in it: it decides which disclosures are sampled and what text is read.
 
 Results are stored under a manifest hash and never overwritten. A second run
 of the same manifest is a no-op; a run under a different protocol or snapshot

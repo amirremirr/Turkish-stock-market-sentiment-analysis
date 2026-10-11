@@ -18,6 +18,27 @@ Steps 1 to 4 happened without a real abnormal return being computed. The code
 enforces the order: step 6 refuses unless step 4 was done for the current
 code and step 5 is finished. There is no interim look.
 
+### Protocol versions
+
+| Version | Hash | Registered | Real results |
+|---|---|---|---|
+| v1 | `92366aa0a6342e9c…` | 2026-10-11T00:15:04Z | none |
+| v2 | `09e9382e77ec44bc…` | 2026-10-11T08:39:14Z | none |
+
+v2 replaces v1 after a follow-up source review (AUDIT_REPORT.md): the
+fingerprint covers the ingester, sample completeness has two parts, and H8
+requires a stated venue. v1 stays in `sr_protocols`; registrations are
+append-only. A run is tied to the protocol whose hash matches the code it ran
+under, so v1 code can only run as v1 and v2 code as v2.
+
+### When the sample is complete enough
+
+Step 5 has two parts. **Ingestion** is complete when every anchor has been
+listed and every target disclosure asked for. **Details** are complete when
+every request was answered. The run requires ingestion complete and at most
+1% of sampled disclosures unavailable. Within that it proceeds, and its
+manifest names each missing disclosure; above it the run refuses.
+
 ## Primary and exploratory
 
 Each hypothesis has **one** primary test, named in its specification. Those
@@ -107,6 +128,8 @@ which the effect would not matter even if real.
 
 - **Missingness:** events lost at each admissibility step and by study status.
 - **Survivorship:** symbols the provider could not serve.
+- **Sample gaps:** disclosures the gateway refused, by index.
+- **Provenance:** digests of the sample, the price snapshot and the roster.
 - **Leakage:** covered by tests, listed in AUDIT_REPORT.md.
 - **Overlap:** thinned and date-only variants beside the primary result.
 - **Price data:** defects by type, calendar gaps, and the price-limit
