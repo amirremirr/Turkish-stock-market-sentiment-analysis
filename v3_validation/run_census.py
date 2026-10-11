@@ -52,7 +52,8 @@ def other_ingestion_processes() -> list:
 
     script = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "
               "'*stock_research.data.kap*' -or $_.CommandLine -like '*ingest-kap*' -or "
-              "$_.CommandLine -like '*v3_validation.run_census*' } | "
+              "$_.CommandLine -like '*v3_validation.run_census*' -or "
+              "$_.CommandLine -like '*run_anchor_ingest*' } | "
               "ForEach-Object { \"$($_.ProcessId)`t$($_.Name)`t$($_.CommandLine)\" }")
     out = subprocess.run(["powershell", "-NoProfile", "-Command", script],
                          capture_output=True, text=True).stdout
@@ -79,9 +80,14 @@ def preconditions(db: Path) -> dict:
         placeholders = con.execute(
             "SELECT COUNT(*) FROM sr_raw_kap_detail WHERE published_raw IS NULL").fetchone()[0]
         integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+        # A process this check does not recognise still leaves a trace: a
+        # detail stored in the last few minutes means something is fetching.
+        latest = con.execute("SELECT MAX(retrieved_at) FROM sr_raw_kap_detail").fetchone()[0]
     finally:
         con.close()
     lineage = [entry["protocol_hash"] for entry in registry.LINEAGE]
+    from datetime import datetime, timezone
+    idle = (datetime.now(timezone.utc) - datetime.fromisoformat(latest)).total_seconds()
     checks = {
         "database_is_the_research_database": all(h in protocols for h in lineage),
         "no_stored_results": results == 0,
@@ -90,6 +96,7 @@ def preconditions(db: Path) -> dict:
         "no_refused_or_placeholder_details": refusals == 0 and placeholders == 0,
         "integrity_check_ok": integrity == "ok",
         "no_other_ingestion_process": not other_ingestion_processes(),
+        "no_detail_stored_in_the_last_five_minutes": idle >= 300,
     }
     return {"checks": checks, "anchor_frame": frame, "other_processes": other_ingestion_processes(),
             "passed": all(checks.values())}
