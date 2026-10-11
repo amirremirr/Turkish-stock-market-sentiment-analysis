@@ -11,6 +11,21 @@ Blocks are processed in a strided order, so an interrupted run still covers the
 whole year thinly rather than its first weeks thickly. Every listing row and
 every detail is committed as it arrives; a rerun skips what is already stored.
 
+Two kinds of completeness are kept apart:
+
+* **Ingestion** is complete when every anchor has been listed and every target
+  disclosure has been asked for.
+* **Details** are complete when every one of those requests was answered.
+
+A disclosure the gateway refuses is logged in ``sr_kap_detail_failures`` and
+asked for again on later runs, up to ``KAP_MAX_DETAIL_ATTEMPTS`` times. It
+never gets a row in ``sr_raw_kap_detail``, and its anchor is
+``incomplete_details``, not ``complete``.
+
+This module decides which disclosures are in the sample (``is_target``) and
+what text the taxonomy and the insider parser read (``body_text``), so it is
+part of the protocol fingerprint. Each run logs the hash of this file.
+
 Nothing here reads a price or computes a return.
 """
 
@@ -23,8 +38,11 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
+import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -33,11 +51,19 @@ from stock_research import store
 from stock_research.config import (
     KAP_FRAME_BLOCKS, KAP_FRAME_FIRST_INDEX, KAP_FRAME_LAST_INDEX,
     KAP_FRAME_STRIDE, KAP_FRAME_VERSION, KAP_LISTED_MEMBER_MARK,
-    KAP_LISTING_TYPES, KAP_TARGET_CLASSES, KAP_THROTTLE_SECONDS, REPOSITORY_ROOT,
+    KAP_LISTING_TYPES, KAP_MAX_DETAIL_ATTEMPTS, KAP_MAX_UNAVAILABLE_SHARE,
+    KAP_TARGET_CLASSES, KAP_THROTTLE_SECONDS, REPOSITORY_ROOT,
 )
 
 logger = logging.getLogger("stock_research.kap")
 SOURCE = "mkk-api-portal-vyk-dev"
+MAX_DETAIL_ATTEMPTS = KAP_MAX_DETAIL_ATTEMPTS
+
+STATUS_PENDING = "pending"
+STATUS_LISTED = "listed"
+STATUS_COMPLETE = "complete"                     # every target detail stored
+STATUS_INCOMPLETE = "incomplete_details"         # every target asked for, some refused
+ATTEMPTED = (STATUS_COMPLETE, STATUS_INCOMPLETE)
 
 
 def frame_blocks() -> List[Dict[str, int]]:
@@ -201,6 +227,35 @@ def is_target(item: Dict[str, Any], listed: set) -> bool:
     )
 
 
+def ingester_sha256() -> str:
+    """SHA-256 of this file with line endings normalised: the same value the
+    protocol fingerprint records for ``data/kap.py``."""
+
+    return hashlib.sha256(Path(__file__).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _code_commit() -> Optional[str]:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPOSITORY_ROOT),
+                                       stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:                                   # pragma: no cover
+        return None
+
+
+def log_event(db_path, run_id: str, event: str, detail: Optional[Dict[str, Any]] = None,
+              *, ingester_hash: Optional[str] = None, code_commit: Optional[str] = None,
+              at: Optional[str] = None) -> None:
+    with store.connect(db_path) as con:
+        con.execute(
+            "INSERT INTO sr_ingest_log (run_id, event, at, frame_version, ingester_sha256, "
+            "code_commit, detail_json) VALUES (?,?,?,?,?,?,?)",
+            (run_id, event, at or store.now_iso(), KAP_FRAME_VERSION,
+             ingester_hash or ingester_sha256(),
+             code_commit if code_commit is not None else _code_commit(),
+             store.dumps(detail) if detail is not None else None),
+        )
+
+
 def _store_detail(db_path, seq: int, index: int, detail: Dict[str, Any]) -> None:
     raw = json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
     with store.connect(db_path) as con:
@@ -219,25 +274,98 @@ def _store_detail(db_path, seq: int, index: int, detail: Dict[str, Any]) -> None
         )
 
 
+def _record_failure(db_path, seq: int, index: int, exc: requests.HTTPError) -> None:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    with store.connect(db_path) as con:
+        con.execute(
+            "INSERT INTO sr_kap_detail_failures (disclosure_index, frame_version, block_seq, "
+            "http_status, error, source, attempted_at) VALUES (?,?,?,?,?,?,?)",
+            (index, KAP_FRAME_VERSION, seq, status, str(exc)[:300], SOURCE, store.now_iso()),
+        )
+
+
+def _target_state(db_path, seq: int, listed: set) -> Dict[str, List[int]]:
+    """Targets of one anchor by what is known about their detail.
+
+    ``stored``: a real detail. ``never_stored``: no row yet, so it can be asked
+    for. ``placeholder``: a row with no timestamp, written by the ingester as
+    it was before 2026-10-11 when a request was refused; the raw table is
+    append-only, so that disclosure stays unavailable.
+    """
+
+    with store.connect(db_path) as con:
+        rows = [dict(r) for r in con.execute(
+            "SELECT l.disclosure_index, l.payload_json, d.disclosure_index AS has_row, "
+            "d.published_raw FROM sr_raw_kap_listing l "
+            "LEFT JOIN sr_raw_kap_detail d USING (disclosure_index) "
+            "WHERE l.frame_version=? AND l.block_seq=? ORDER BY l.disclosure_index",
+            (KAP_FRAME_VERSION, seq))]
+    state: Dict[str, List[int]] = {"stored": [], "never_stored": [], "placeholder": []}
+    for row in rows:
+        if not is_target(json.loads(row["payload_json"]), listed):
+            continue
+        if row["has_row"] is None:
+            state["never_stored"].append(row["disclosure_index"])
+        elif row["published_raw"] is None:
+            state["placeholder"].append(row["disclosure_index"])
+        else:
+            state["stored"].append(row["disclosure_index"])
+    return state
+
+
+def _attempts(db_path, indices: List[int]) -> Dict[int, int]:
+    if not indices:
+        return {}
+    marks = ",".join("?" * len(indices))
+    with store.connect(db_path) as con:
+        return {r[0]: r[1] for r in con.execute(
+            f"SELECT disclosure_index, COUNT(*) FROM sr_kap_detail_failures "
+            f"WHERE disclosure_index IN ({marks}) GROUP BY disclosure_index", indices)}
+
+
+def _next_block(db_path, listed: set, visited: set):
+    """The next anchor with work: unfinished ones first, then anchors with a
+    refused detail that may still be asked for again."""
+
+    with store.connect(db_path) as con:
+        rows = [dict(r) for r in con.execute(
+            "SELECT * FROM sr_kap_frame WHERE frame_version=? AND status!=? "
+            "ORDER BY (status=?) , process_order",
+            (KAP_FRAME_VERSION, STATUS_COMPLETE, STATUS_INCOMPLETE))]
+    for block in rows:
+        if block["block_seq"] in visited:
+            continue
+        if block["status"] != STATUS_INCOMPLETE:
+            return block
+        missing = _target_state(db_path, block["block_seq"], listed)["never_stored"]
+        attempts = _attempts(db_path, missing)
+        if any(attempts.get(i, 0) < MAX_DETAIL_ATTEMPTS for i in missing):
+            return block
+    return None
+
+
 def run(db_path=None, *, max_hours: float = 8.0,
         max_blocks: Optional[int] = None) -> Dict[str, Any]:
     ensure_frame(db_path)
     snapshot = ensure_members(db_path)
     listed = _listed_member_ids(db_path, snapshot)
     deadline = time.time() + max_hours * 3600
-    done_blocks = 0
+    run_id = uuid.uuid4().hex
+    # Taken once, at the start: the code that is running, not whatever is on
+    # disk when the run ends.
+    identity = {"ingester_hash": ingester_sha256(), "code_commit": _code_commit() or ""}
+    log_event(db_path, run_id, "start", {"max_hours": max_hours, "max_blocks": max_blocks,
+                                         "members_snapshot": snapshot}, **identity)
+    done_blocks, visited = 0, set()
 
     while time.time() < deadline:
-        with store.connect(db_path) as con:
-            block = con.execute(
-                "SELECT * FROM sr_kap_frame WHERE frame_version=? AND status!='complete' "
-                "ORDER BY process_order LIMIT 1", (KAP_FRAME_VERSION,),
-            ).fetchone()
+        block = _next_block(db_path, listed, visited)
         if block is None:
             break
         seq, start = block["block_seq"], block["block_start"]
+        visited.add(seq)
 
-        if block["status"] == "pending":
+        if block["status"] == STATUS_PENDING:
             listing = api_get("/disclosures", {
                 "disclosureIndex": str(start),
                 "disclosureTypes": ",".join(KAP_LISTING_TYPES),
@@ -252,64 +380,119 @@ def run(db_path=None, *, max_hours: float = 8.0,
                          store.dumps(item), SOURCE, store.now_iso()),
                     )
                 con.execute(
-                    "UPDATE sr_kap_frame SET status='listed', listed=?, targets=?, "
+                    "UPDATE sr_kap_frame SET status=?, listed=?, targets=?, "
                     "updated_at=? WHERE frame_version=? AND block_seq=?",
-                    (len(listing), sum(1 for i in listing if is_target(i, listed)),
+                    (STATUS_LISTED, len(listing), sum(1 for i in listing if is_target(i, listed)),
                      store.now_iso(), KAP_FRAME_VERSION, seq),
                 )
 
-        with store.connect(db_path) as con:
-            rows = [dict(r) for r in con.execute(
-                "SELECT l.disclosure_index, l.payload_json FROM sr_raw_kap_listing l "
-                "LEFT JOIN sr_raw_kap_detail d USING (disclosure_index) "
-                "WHERE l.frame_version=? AND l.block_seq=? AND d.disclosure_index IS NULL "
-                "ORDER BY l.disclosure_index", (KAP_FRAME_VERSION, seq))]
-        pending = [r for r in rows if is_target(json.loads(r["payload_json"]), listed)]
-
+        missing = _target_state(db_path, seq, listed)["never_stored"]
+        attempts = _attempts(db_path, missing)
         out_of_time = False
-        for row in pending:
+        for index in missing:
+            if attempts.get(index, 0) >= MAX_DETAIL_ATTEMPTS:
+                continue
             if time.time() >= deadline:
                 out_of_time = True
                 break
-            index = row["disclosure_index"]
             try:
                 detail = api_get(f"/disclosureDetail/{index}", {"fileType": "html"})
             except requests.HTTPError as exc:
+                # The gateway answered and refused. Logged as a gap; the anchor
+                # cannot be complete while it stands.
                 logger.warning("detail %s unavailable: %s", index, exc)
-                detail = {"disclosureIndex": str(index), "unavailable": str(exc)[:200]}
+                _record_failure(db_path, seq, index, exc)
+                continue
             _store_detail(db_path, seq, index, detail)
         if out_of_time:
             break
 
+        state = _target_state(db_path, seq, listed)
+        gaps = len(state["never_stored"]) + len(state["placeholder"])
+        status = STATUS_COMPLETE if gaps == 0 else STATUS_INCOMPLETE
         with store.connect(db_path) as con:
             con.execute(
-                "UPDATE sr_kap_frame SET status='complete', updated_at=? "
+                "UPDATE sr_kap_frame SET status=?, updated_at=? "
                 "WHERE frame_version=? AND block_seq=?",
-                (store.now_iso(), KAP_FRAME_VERSION, seq),
+                (status, store.now_iso(), KAP_FRAME_VERSION, seq),
             )
         done_blocks += 1
-        logger.info("block %s (start %s) complete: %s details", seq, start, len(pending))
+        logger.info("block %s (start %s) %s: %s stored, %s unavailable", seq, start, status,
+                    len(state["stored"]), gaps)
         if max_blocks and done_blocks >= max_blocks:
             break
 
-    return progress(db_path)
+    result = progress(db_path)
+    log_event(db_path, run_id, "finish", result, **identity)
+    return result
+
+
+def unavailable_details(db_path=None) -> List[int]:
+    """Target disclosures of attempted anchors that have no real detail."""
+
+    with store.connect(db_path) as con:
+        snapshot = con.execute(
+            "SELECT snapshot_id FROM sr_raw_members ORDER BY retrieved_at DESC LIMIT 1").fetchone()
+        blocks = [r[0] for r in con.execute(
+            "SELECT block_seq FROM sr_kap_frame WHERE frame_version=? AND status IN (?,?)",
+            (KAP_FRAME_VERSION, *ATTEMPTED))]
+    if snapshot is None:
+        return []
+    listed = _listed_member_ids(db_path, snapshot[0])
+    missing: List[int] = []
+    for seq in blocks:
+        state = _target_state(db_path, seq, listed)
+        missing += state["never_stored"] + state["placeholder"]
+    return sorted(missing)
 
 
 def progress(db_path=None) -> Dict[str, Any]:
+    """Where the sample stands, with ingestion and detail completeness apart.
+
+    ``frame_complete`` is the gate the analysis uses: every anchor attempted
+    **and** the share of unavailable details within the registered tolerance.
+    """
+
     with store.connect(db_path) as con:
-        rows = con.execute(
-            "SELECT status, COUNT(*) n, COALESCE(SUM(targets),0) t, "
-            "COALESCE(SUM(details_done),0) d FROM sr_kap_frame "
-            "WHERE frame_version=? GROUP BY status", (KAP_FRAME_VERSION,),
-        ).fetchall()
-    by_status = {r["status"]: {"blocks": r["n"], "targets": r["t"], "details": r["d"]}
-                 for r in rows}
-    complete = by_status.get("complete", {}).get("blocks", 0)
+        frame = [dict(r) for r in con.execute(
+            "SELECT block_seq, status, COALESCE(targets, 0) AS targets FROM sr_kap_frame "
+            "WHERE frame_version=?", (KAP_FRAME_VERSION,))]
+        stored = {r[0]: r[1] for r in con.execute(
+            "SELECT l.block_seq, COUNT(*) FROM sr_raw_kap_detail d "
+            "JOIN sr_raw_kap_listing l USING (disclosure_index) "
+            "WHERE l.frame_version=? AND d.published_raw IS NOT NULL GROUP BY l.block_seq",
+            (KAP_FRAME_VERSION,))}
+    by_status: Dict[str, Dict[str, int]] = {}
+    targets = details_stored = unavailable = 0
+    for block in frame:
+        have = stored.get(block["block_seq"], 0)
+        entry = by_status.setdefault(block["status"], {"blocks": 0, "targets": 0, "details": 0})
+        entry["blocks"] += 1
+        entry["targets"] += block["targets"]
+        entry["details"] += have
+        details_stored += have
+        if block["status"] in ATTEMPTED:
+            targets += block["targets"]
+            unavailable += max(0, block["targets"] - have)
+    complete = by_status.get(STATUS_COMPLETE, {}).get("blocks", 0)
+    attempted = complete + by_status.get(STATUS_INCOMPLETE, {}).get("blocks", 0)
+    ingestion_complete = bool(frame) and attempted == len(frame) == KAP_FRAME_BLOCKS
+    share = (unavailable / targets) if targets else 0.0
+    within = share <= KAP_MAX_UNAVAILABLE_SHARE
     return {
         "frame_version": KAP_FRAME_VERSION,
         "blocks_total": KAP_FRAME_BLOCKS,
         "blocks_complete": complete,
-        "frame_complete": complete == KAP_FRAME_BLOCKS,
+        "blocks_attempted": attempted,
+        "ingestion_complete": ingestion_complete,
+        "targets": targets,
+        "details_stored": details_stored,
+        "details_unavailable": unavailable,
+        "unavailable_share": share,
+        "max_unavailable_share": KAP_MAX_UNAVAILABLE_SHARE,
+        "within_tolerance": within,
+        "details_complete": ingestion_complete and unavailable == 0,
+        "frame_complete": ingestion_complete and within,
         "by_status": by_status,
     }
 

@@ -244,7 +244,7 @@ def kap_context(*, effect: bool = False, seed: int = 21, sessions: int = 520,
             "bucket": str(rng.choice(["post_close", "pre_open", "during_session"])),
             "timing_ambiguous": False, "category": category, "is_update": False,
             "is_correction": False, "insider_parse_status": None, "insider_side": None,
-            "insider_value": None, "insider_role": None, **extra})
+            "insider_value": None, "insider_role": None, "insider_venue": None, **extra})
 
     for category, total in (("cat_up", 0.03), ("cat_down", -0.02), ("cat_flat_a", 0.0),
                             ("cat_flat_b", 0.0), ("cat_flat_c", 0.0)):
@@ -259,10 +259,11 @@ def kap_context(*, effect: bool = False, seed: int = 21, sessions: int = 520,
             _spread(intraday, ticker, index, tuple(range(1, 21)), 0.04)
         row("insider_trade", ticker, index, insider_parse_status="parsed",
             insider_side="buy", insider_value=float(rng.uniform(1e5, 5e6)),
-            insider_role="board_member")
+            insider_role="board_member", insider_venue="on_exchange")
     for _ in range(25):
         ticker, index = place()
-        row("insider_trade", ticker, index, insider_parse_status="parsed", insider_side="sell")
+        row("insider_trade", ticker, index, insider_parse_status="parsed", insider_side="sell",
+            insider_venue="on_exchange")
 
     panel = make_panel(days, tickers, seed=seed + 1, intraday_effects=intraday)
     availability = dict(ALL_AVAILABLE)

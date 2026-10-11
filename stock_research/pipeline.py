@@ -4,9 +4,14 @@ Two rules are enforced here rather than left to whoever runs a command:
 
 * **No real outcome before the rules.** A real-data run needs the current
   protocol hash to be registered in the database already.
-* **No real outcome on a partial sample.** A real-data run needs the KAP
-  sample frame to be complete. An "interim look" on whatever has arrived so
-  far is the stock-level version of peeking, and there is no flag for it.
+* **No real outcome on a partial sample.** A real-data run needs every anchor
+  of the KAP sample frame to have been attempted. An "interim look" on
+  whatever has arrived so far is the stock-level version of peeking, and there
+  is no flag for it.
+* **A gap is counted, and a large one stops the run.** Disclosures the gateway
+  refused are not in the sample. Up to the registered tolerance the run
+  proceeds and the manifest names each missing disclosure; above it the run
+  refuses.
 
 Diagnostics that read no return -- how many events, of which category, with
 which tickers resolved -- can be run at any time.
@@ -14,6 +19,8 @@ which tickers resolved -- can be run at any time.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 import subprocess
 from datetime import date, datetime, timezone
@@ -173,13 +180,9 @@ def real_context(db_path=None, *, snapshot_id: Optional[str] = None,
         sealed=guards.sealed_from(index_db),
         frame_complete=bool(progress["frame_complete"]),
     )
-    with store.connect(db_path) as con:
-        unavailable = con.execute(
-            "SELECT COUNT(*) FROM sr_raw_kap_detail d JOIN sr_raw_kap_listing l "
-            "USING (disclosure_index) WHERE l.frame_version = ? AND d.published_raw IS NULL",
-            (KAP_FRAME_VERSION,)).fetchone()[0]
     meta = {"snapshot_id": snapshot_id, "frame": progress, "news": news,
-            "details": int(len(details)), "details_unavailable": int(unavailable)}
+            "details": int(len(details)),
+            "details_unavailable": int(progress["details_unavailable"])}
     return ctx, meta
 
 
@@ -244,8 +247,63 @@ def describe(ctx: Context, meta: Dict[str, Any]) -> Dict[str, Any]:
                 "by_status": insider["insider_parse_status"].value_counts().to_dict(),
                 "by_side": insider["insider_side"].fillna("none").value_counts().to_dict(),
                 "by_kind": insider["insider_kind"].fillna("none").value_counts().to_dict(),
+                "purchases_by_venue": insider.loc[
+                    insider["insider_side"] == "buy", "insider_venue"
+                ].fillna("unknown").value_counts().to_dict(),
             }
     return out
+
+
+def _digest(rows) -> str:
+    digest = hashlib.sha256()
+    for row in rows:
+        digest.update(json.dumps(list(row), ensure_ascii=False, default=str).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def dataset_provenance(db_path=None, snapshot_id: Optional[str] = None) -> Dict[str, Any]:
+    """Digests of the data a run reads, and of how the sample was fetched.
+
+    A snapshot id names a set of rows; it does not show the rows are the same
+    ones another run saw. These digests do. They are computed over content
+    only (no retrieval timestamps), in a fixed order, so the same data gives
+    the same digest on any machine.
+    """
+
+    snapshot_id = snapshot_id or latest_snapshot(db_path)
+    with store.connect(db_path) as con:
+        kap_rows = con.execute(
+            "SELECT d.disclosure_index, d.payload_sha256, d.published_raw, d.sender_codes, "
+            "d.related_stocks, d.subject_tr FROM sr_raw_kap_detail d "
+            "JOIN sr_raw_kap_listing l USING (disclosure_index) WHERE l.frame_version = ? "
+            "ORDER BY d.disclosure_index", (KAP_FRAME_VERSION,)).fetchall()
+        price_rows = con.execute(
+            "SELECT ticker, date, open, high, low, close, adj_close, volume, dividend, "
+            "split_ratio FROM sr_raw_price_bars WHERE snapshot_id = ? ORDER BY ticker, date",
+            (snapshot_id,)).fetchall()
+        member_rows = con.execute(
+            "SELECT member_id, title, stock_codes, member_type FROM sr_raw_members "
+            "ORDER BY snapshot_id, member_id").fetchall()
+        failures = con.execute("SELECT COUNT(*) FROM sr_kap_detail_failures").fetchone()[0]
+        ingest = [dict(r) for r in con.execute(
+            "SELECT run_id, event, at, ingester_sha256, code_commit FROM sr_ingest_log "
+            "ORDER BY event_id")]
+        retrieved = con.execute(
+            "SELECT MIN(retrieved_at), MAX(retrieved_at) FROM sr_raw_price_bars "
+            "WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
+    return {
+        "kap_frame_version": KAP_FRAME_VERSION,
+        "kap_sample_digest": _digest(kap_rows),
+        "price_snapshot_id": snapshot_id,
+        "price_snapshot_digest": _digest(price_rows),
+        "price_retrieved_between": [retrieved[0], retrieved[1]],
+        "members_snapshot_digest": _digest(member_rows),
+        "counts": {"kap_details": len(kap_rows), "price_bars": len(price_rows),
+                   "members": len(member_rows), "refused_detail_requests": failures},
+        "ingestion_log": ingest,
+        "ingester_sha256_now": kap.ingester_sha256(),
+    }
 
 
 def run_real(db_path=None, *, index_db: Optional[str | Path] = None) -> Dict[str, Any]:
@@ -263,11 +321,18 @@ def run_real(db_path=None, *, index_db: Optional[str | Path] = None) -> Dict[str
             f"protocol {digest[:16]} is not registered; the code has changed since "
             "registration, or `register` was never run")
     ctx, meta = real_context(db_path, index_db=index_db)
-    if not ctx.frame_complete:
-        frame = meta["frame"]
+    frame = meta["frame"]
+    if not frame["ingestion_complete"]:
         raise NotReady(
-            f"KAP sample frame is incomplete ({frame['blocks_complete']} of "
-            f"{frame['blocks_total']} anchors); no outcome is read on a partial sample")
+            f"KAP sample ingestion is incomplete ({frame['blocks_attempted']} of "
+            f"{frame['blocks_total']} anchors attempted); no outcome is read on a "
+            "partial sample")
+    if not frame["within_tolerance"]:
+        raise NotReady(
+            f"{frame['details_unavailable']} of {frame['targets']} sampled disclosures "
+            f"are unavailable ({frame['unavailable_share']:.2%}); the registered "
+            f"tolerance is {frame['max_unavailable_share']:.0%}. Rerun `ingest-kap` "
+            "to ask for them again")
 
     results = registry.run_all(ctx)
     manifest = registry.manifest(
@@ -275,6 +340,14 @@ def run_real(db_path=None, *, index_db: Optional[str | Path] = None) -> Dict[str
         analysis_date=datetime.now(timezone.utc).date().isoformat(),
         extra={"kap_frame_version": KAP_FRAME_VERSION,
                "protocol_registered_at": registered[0],
+               "kap_sample": {
+                   "targets": frame["targets"],
+                   "details_stored": frame["details_stored"],
+                   "details_unavailable": frame["details_unavailable"],
+                   "unavailable_share": frame["unavailable_share"],
+                   "unavailable_indices": kap.unavailable_details(db_path),
+               },
+               "provenance": dataset_provenance(db_path, meta["snapshot_id"]),
                "sample": describe(ctx, meta)})
     registry.store_results(manifest, results, db_path)
     return {"manifest": manifest, "results": results}

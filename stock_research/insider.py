@@ -26,6 +26,22 @@ unparsed form is not an event.
 Not open-market purchases, excluded where the text shows it: transfers and
 off-exchange deals, option exercises, capital-increase allotments, inheritance
 and gifts.
+
+Venue
+-----
+No field of the form states where a trade was executed. The venue is therefore
+one of three values, and the default is not "on the exchange":
+
+``on_exchange``   the explanation names the exchange as the place of the trade
+                  ("Borsa İstanbul A.Ş. nezdinde", "Borsa İstanbul'da", "BİAŞ
+                  Pay Piyasası'nda"), near a word for the trade itself;
+``off_exchange``  the explanation says the trade was outside the exchange;
+``unknown``       anything else, including the common template that gives a
+                  price range and no venue.
+
+Naming the exchange as where the shares are *listed* ("Borsa İstanbul'da
+işlem gören paylar") is not a statement about the trade, and does not count.
+H8 treats only ``on_exchange`` purchases as confirmed open-market purchases.
 """
 
 from __future__ import annotations
@@ -35,7 +51,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from stock_research.entities import fold
 
-INSIDER_PARSER_VERSION = "insider-parser-v3"
+INSIDER_PARSER_VERSION = "insider-parser-v4"
+
+VENUE_ON = "on_exchange"
+VENUE_OFF = "off_exchange"
+VENUE_UNKNOWN = "unknown"
 
 PARSED = "parsed"
 UNPARSED = "unparsed"
@@ -54,7 +74,17 @@ _EXCLUSION_STEMS = (
     "miras", "bagis", "hibe",
 )
 _OWN_SHARE_PHRASES = ("kendi paylari", "geri alim", "geri alinan", "pay geri al")
-_VENUE_PHRASES = ("borsa istanbul", "borsa'da", "borsada", "bias")
+#: Folded names for the exchange as a place.
+_VENUE_NAMES = re.compile(
+    r"(?<![a-z])(borsa istanbul(?: a\.s\.)?|bias|borsa'da|borsada|pay piyasasi)(?![a-z])")
+#: "outside the exchange", with or without its name between the two words.
+_OFF_EXCHANGE = re.compile(r"(?<![a-z])borsa(?: istanbul)?(?: a\.s\.)?(?:'nin)?\s+dis")
+#: Words for the trade itself; a venue counts only near one of them.
+_TRADE_WORDS = ("alis", "alim", "satis", "satim", "gerceklestir", "islem")
+#: The exchange named as where the shares are listed, not where a trade was made.
+_LISTED_ON = re.compile(r"^(?:'da|'de|'nda|'nde)?(?: nezdinde)?\s*islem gor")
+#: Exclusion stems that are themselves statements about venue.
+_OFF_EXCHANGE_STEMS = ("borsa disi", "borsa disinda", "devir", "devri", "devral", "virman")
 _ROLE_PHRASES = (
     ("yonetim kurulu baskani", "board_chair"),
     ("yonetim kurulu uyesi", "board_member"),
@@ -135,6 +165,26 @@ def transaction_rows(body: Optional[str]) -> List[Dict[str, Any]]:
     return rows
 
 
+def execution_venue(explanation: str) -> Dict[str, Optional[str]]:
+    """Where the folded *explanation* says the trade was executed.
+
+    ``on_exchange`` needs positive evidence; silence is ``unknown``.
+    """
+
+    if _OFF_EXCHANGE.search(explanation):
+        return {"insider_venue": VENUE_OFF, "insider_venue_evidence": None}
+    for match in _VENUE_NAMES.finditer(explanation):
+        if _LISTED_ON.match(explanation[match.end():match.end() + 30]):
+            continue
+        nearby = explanation[max(0, match.start() - 80):match.end() + 80]
+        without_name = nearby.replace(match.group(0), " ")
+        if any(word in without_name for word in _TRADE_WORDS):
+            return {"insider_venue": VENUE_ON,
+                    "insider_venue_evidence": explanation[max(0, match.start() - 30):
+                                                          match.end() + 40].strip()}
+    return {"insider_venue": VENUE_UNKNOWN, "insider_venue_evidence": None}
+
+
 def transaction_kind(body: Optional[str], summary: Optional[str],
                      sender_codes: Sequence[str], related_codes: Sequence[str]) -> str:
     """Whose shares were traded, relative to who filed."""
@@ -157,7 +207,8 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
         "insider_parse_status": UNPARSED, "insider_kind": None, "insider_side": None,
         "insider_buy_nominal": None, "insider_sell_nominal": None,
         "insider_price_mid": None, "insider_value": None, "insider_role": None,
-        "insider_exclusion": None, "insider_venue_stated": None,
+        "insider_exclusion": None, "insider_venue": VENUE_UNKNOWN,
+        "insider_venue_evidence": None,
     }
     folded = fold(body)
     if not folded:
@@ -165,10 +216,15 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
     out["insider_kind"] = transaction_kind(body, summary, sender_codes, related_codes)
 
     explanation = folded.split(fold(_TABLE_MARKER))[0]
-    out["insider_venue_stated"] = any(phrase in explanation for phrase in _VENUE_PHRASES)
+    out.update(execution_venue(explanation))
+    if out["insider_venue"] == VENUE_OFF:
+        out.update({"insider_parse_status": EXCLUDED, "insider_exclusion": "off_exchange"})
+        return out
     for stem in _EXCLUSION_STEMS:
         if re.search(rf"(?<![a-z]){re.escape(stem)}", explanation):
             out.update({"insider_parse_status": EXCLUDED, "insider_exclusion": stem})
+            if stem in _OFF_EXCHANGE_STEMS:
+                out.update({"insider_venue": VENUE_OFF, "insider_venue_evidence": None})
             return out
     for phrase, role in _ROLE_PHRASES:
         if phrase in explanation:

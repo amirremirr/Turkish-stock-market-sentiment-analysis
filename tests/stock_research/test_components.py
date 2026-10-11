@@ -169,7 +169,7 @@ def test_a_blank_table_cell_cannot_turn_a_sale_into_a_purchase():
     assert parsed["insider_parse_status"] == insider.PARSED and parsed["insider_exclusion"] is None
     assert (parsed["insider_side"], parsed["insider_sell_nominal"], parsed["insider_buy_nominal"]) == (
         "sell", 190000.0, 0.0)
-    assert parsed["insider_venue_stated"] and parsed["insider_role"] == "shareholder"
+    assert parsed["insider_venue"] == "on_exchange" and parsed["insider_role"] == "shareholder"
     # The mirror case: one amount, holdings rose.
     bought = insider.parse_insider(_form("alış işlemi", "12/10/2023 5.000 5.000 100.000 105.000 % 1 % 1"))
     assert (bought["insider_side"], bought["insider_buy_nominal"]) == ("buy", 5000.0)

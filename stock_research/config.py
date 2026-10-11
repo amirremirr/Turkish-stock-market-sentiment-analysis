@@ -39,6 +39,12 @@ KAP_LISTING_TYPES = ("ODA", "CA")   # material events and structured corporate-a
 KAP_THROTTLE_SECONDS = 11           # free plan: 6 calls/minute
 KAP_TARGET_CLASSES = ("ODA",)
 KAP_LISTED_MEMBER_MARK = "IGS"      # "İşlem Gören Şirket": listed company
+#: How many times a disclosure detail the gateway refuses is asked for again.
+KAP_MAX_DETAIL_ATTEMPTS = 3
+#: Largest share of sampled disclosures that may be unavailable for the sample
+#: still to be analysed. Above it the run refuses; at or below it the run
+#: proceeds and records exactly which disclosures are missing.
+KAP_MAX_UNAVAILABLE_SHARE = 0.01
 
 # -- Event study ---------------------------------------------------------------
 EVENT_WINDOWS = (

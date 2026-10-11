@@ -20,6 +20,7 @@ from stock_research.config import SCHEMA_VERSION, STOCK_DB_PATH
 _APPEND_ONLY = (
     "sr_raw_kap_listing", "sr_raw_kap_detail", "sr_raw_price_bars",
     "sr_raw_members", "sr_protocols", "sr_manifests", "sr_results",
+    "sr_kap_detail_failures", "sr_ingest_log",
 )
 
 _DDL = """
@@ -69,12 +70,40 @@ CREATE TABLE IF NOT EXISTS sr_kap_frame (
     block_seq     INTEGER NOT NULL,
     block_start   INTEGER NOT NULL,
     process_order INTEGER NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'pending',   -- pending|listed|complete
+    status        TEXT NOT NULL DEFAULT 'pending',   -- pending|listed|complete|incomplete_details
     listed        INTEGER,
     targets       INTEGER,
     details_done  INTEGER NOT NULL DEFAULT 0,
     updated_at    TEXT,
     PRIMARY KEY (frame_version, block_seq)
+);
+
+-- Every refused request for a disclosure detail. A disclosure that could not
+-- be fetched has rows here and none in sr_raw_kap_detail: a gap is recorded as
+-- a gap, not as a placeholder that looks like a disclosure.
+CREATE TABLE IF NOT EXISTS sr_kap_detail_failures (
+    failure_id       INTEGER PRIMARY KEY,
+    disclosure_index INTEGER NOT NULL,
+    frame_version    TEXT NOT NULL,
+    block_seq        INTEGER NOT NULL,
+    http_status      INTEGER,
+    error            TEXT,
+    source           TEXT NOT NULL,
+    attempted_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_sr_kap_failures ON sr_kap_detail_failures (disclosure_index);
+
+-- One 'start' and one 'finish' row per ingestion run, with the SHA-256 of the
+-- ingester's own source at the time. Says which code fetched the sample.
+CREATE TABLE IF NOT EXISTS sr_ingest_log (
+    event_id        INTEGER PRIMARY KEY,
+    run_id          TEXT NOT NULL,
+    event           TEXT NOT NULL,      -- start | finish | attested
+    at              TEXT NOT NULL,
+    frame_version   TEXT NOT NULL,
+    ingester_sha256 TEXT NOT NULL,
+    code_commit     TEXT,
+    detail_json     TEXT
 );
 
 -- Member snapshot. NOT point-in-time: it is the roster the provider served on

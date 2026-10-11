@@ -20,13 +20,38 @@ from stock_research.data import prices
 from stock_research.hypotheses import common, h1, h2, h3, h4, h5, h6, h7, h8, h9
 from stock_research.hypotheses.common import Context
 
-PROTOCOL_VERSION = "stock-research-protocol-v1"
+PROTOCOL_VERSION = "stock-research-protocol-v2"
+
+#: The protocol this one replaces. It stays registered, and anything stored
+#: under it stays stored; v2 is a different study, not an edit of v1.
+SUPERSEDES = {
+    "protocol_version": "stock-research-protocol-v1",
+    "protocol_hash": "92366aa0a6342e9c78c02700a7253b45e5dc4ce0cac6476467057164cb66dfb8",
+    "registered_at": "2026-10-11T00:15:04+00:00",
+    "code_commit": "ecdc532",
+    "real_results_under_it": 0,
+}
+CHANGES_FROM_PREVIOUS = (
+    "The fingerprint now covers data/kap.py. The ingester decides which "
+    "disclosures are in the sample and what text is read from them, and v1 "
+    "left it out.",
+    "Sample completeness has two parts. An anchor with a refused disclosure "
+    "detail is incomplete_details, not complete; the run needs every anchor "
+    "attempted and at most 1% of sampled disclosures unavailable, and records "
+    "which ones are missing.",
+    "H8 counts a purchase only if the text states it was made on the exchange. "
+    "v1 assumed on-exchange unless the text said otherwise. Purchases with no "
+    "stated venue are a sensitivity analysis.",
+    "Each stored run records digests of the KAP sample, the price snapshot and "
+    "the member roster it was computed from, and the ingestion runs that built "
+    "the sample.",
+)
 
 #: Files that cannot change a registered result: fixtures and the report
-#: renderer only display, the CLI only dispatches, and the ingester only
-#: fetches. Everything else under stock_research/ is fingerprinted.
-_NOT_RESULT_BEARING = {"fixtures.py", "reporting.py", "cli.py", "data/kap.py",
-                       "registry_doc.py"}
+#: renderer only display, the CLI only dispatches, and registry_doc only
+#: prints the specifications. Everything else under stock_research/ is
+#: fingerprinted, the ingester included.
+_NOT_RESULT_BEARING = {"fixtures.py", "reporting.py", "cli.py", "registry_doc.py"}
 
 MODULES = (h1, h2, h3, h4, h5, h6, h7, h8, h9)
 SPECS = {module.SPEC.id: module.SPEC for module in MODULES}
@@ -67,6 +92,8 @@ def code_fingerprint() -> Dict[str, str]:
 def protocol_document() -> Dict[str, Any]:
     return {
         "protocol_version": PROTOCOL_VERSION,
+        "supersedes": dict(SUPERSEDES),
+        "changes_from_previous": list(CHANGES_FROM_PREVIOUS),
         "code_fingerprint": code_fingerprint(),
         "family_size": common.FAMILY_SIZE,
         "alpha": config.ALPHA,
@@ -106,6 +133,9 @@ def protocol_document() -> Dict[str, Any]:
                 "blocks": config.KAP_FRAME_BLOCKS,
                 "listing_types": list(config.KAP_LISTING_TYPES),
                 "target_classes": list(config.KAP_TARGET_CLASSES),
+                "listed_member_mark": config.KAP_LISTED_MEMBER_MARK,
+                "max_detail_attempts": config.KAP_MAX_DETAIL_ATTEMPTS,
+                "max_unavailable_share": config.KAP_MAX_UNAVAILABLE_SHARE,
             },
             "sealed_index_boundary": config.SEALED_INDEX_BOUNDARY,
             "subject_categories": events.SUBJECT_CATEGORIES,
