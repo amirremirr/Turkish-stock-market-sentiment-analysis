@@ -20,7 +20,8 @@ from stock_research.config import SCHEMA_VERSION, STOCK_DB_PATH
 _APPEND_ONLY = (
     "sr_raw_kap_listing", "sr_raw_kap_detail", "sr_raw_price_bars",
     "sr_raw_members", "sr_protocols", "sr_manifests", "sr_results",
-    "sr_kap_detail_failures", "sr_ingest_log",
+    "sr_kap_detail_failures", "sr_ingest_log", "sr_kap_frame_items",
+    "sr_raw_price_bars_secondary", "sr_raw_capital_actions",
 )
 
 _DDL = """
@@ -78,6 +79,19 @@ CREATE TABLE IF NOT EXISTS sr_kap_frame (
     PRIMARY KEY (frame_version, block_seq)
 );
 
+-- Which disclosures a frame holds, page by page. A census reuses raw rows
+-- fetched under an earlier frame; this table says they belong to it without
+-- touching them.
+CREATE TABLE IF NOT EXISTS sr_kap_frame_items (
+    frame_version    TEXT NOT NULL,
+    disclosure_index INTEGER NOT NULL,
+    block_seq        INTEGER NOT NULL,
+    is_target        INTEGER NOT NULL,
+    recorded_at      TEXT NOT NULL,
+    PRIMARY KEY (frame_version, disclosure_index)
+);
+CREATE INDEX IF NOT EXISTS ix_sr_frame_items_page ON sr_kap_frame_items (frame_version, block_seq);
+
 -- Every refused request for a disclosure detail. A disclosure that could not
 -- be fetched has rows here and none in sr_raw_kap_detail: a gap is recorded as
 -- a gap, not as a placeholder that looks like a disclosure.
@@ -133,6 +147,34 @@ CREATE TABLE IF NOT EXISTS sr_raw_price_bars (
     PRIMARY KEY (snapshot_id, ticker, date)
 );
 CREATE INDEX IF NOT EXISTS ix_sr_bars_ticker ON sr_raw_price_bars (ticker, date);
+
+-- A second provider's closes, raw and adjusted, for reconciliation. Kept
+-- apart from the primary bars: it is evidence about them, not a substitute.
+CREATE TABLE IF NOT EXISTS sr_raw_price_bars_secondary (
+    snapshot_id    TEXT NOT NULL,
+    ticker         TEXT NOT NULL,
+    date           TEXT NOT NULL,
+    close_raw      REAL,
+    close_adjusted REAL,
+    source         TEXT NOT NULL,
+    retrieved_at   TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, ticker, date)
+);
+
+-- Capital increases and dividends as the second provider lists them.
+CREATE TABLE IF NOT EXISTS sr_raw_capital_actions (
+    snapshot_id      TEXT NOT NULL,
+    ticker           TEXT NOT NULL,
+    action_date      TEXT NOT NULL,
+    kind             TEXT NOT NULL,   -- rights_issue|bonus_issue|rights_and_bonus|cash_dividend|other
+    rights_pct       REAL,
+    bonus_pct        REAL,
+    cash_dividend_pct REAL,
+    adjustment_ratio REAL,
+    source           TEXT NOT NULL,
+    retrieved_at     TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, ticker, action_date, kind)
+);
 
 -- A ticker a provider could not serve. Missing is a state, not an absence.
 CREATE TABLE IF NOT EXISTS sr_price_availability (

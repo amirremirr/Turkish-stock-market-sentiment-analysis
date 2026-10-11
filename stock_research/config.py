@@ -11,7 +11,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 #: never committed.
 STOCK_DB_PATH = REPOSITORY_ROOT / "stock_research.db"
 
-SCHEMA_VERSION = "stock-research-schema-v1"
+SCHEMA_VERSION = "stock-research-schema-v2"
 
 # -- Sealed index test ---------------------------------------------------------
 #: The index study's untouched window opens here. Until its single result is
@@ -30,21 +30,38 @@ SEALED_INDEX_BOUNDARY = "2026-08-10"
 #: v1 listed unfiltered blocks and was abandoned after 9 blocks, before any
 #: price was read: two thirds of all disclosures are daily fund bulletins, so
 #: a block held about four usable events. v2 filters the listing by type.
-KAP_FRAME_VERSION = "kap-anchor-sample-v2"
+#:
+#: v3 is a census of the same range: every material-event disclosure of a
+#: listed company between the two indices, read page by page. The readiness
+#: audit measured about 15,100 of them (0.108 per disclosure number), which is
+#: about two days of calls, not the infeasible job the v2 note assumed; and it
+#: showed that 80 anchors cannot detect an effect of plausible size. Every
+#: listing row and detail stored under v2 is a member of the census and is
+#: reused as stored.
+KAP_FRAME_VERSION = "kap-census-2023-v3"
 KAP_FRAME_FIRST_INDEX = 1_091_700
 KAP_FRAME_LAST_INDEX = 1_231_017
-KAP_FRAME_BLOCKS = 80
-KAP_FRAME_STRIDE = 37               # coprime with 80: processing order spreads over the year
+KAP_LISTING_PAGE = 50               # disclosures per listing call
+#: Earlier frames whose raw rows stay in the database. Their listing rows are
+#: census members by construction (same range, same listing filter).
+KAP_EARLIER_FRAMES = ("kap-anchor-sample-v2",)
+KAP_ANCHOR_FRAME_VERSION = "kap-anchor-sample-v2"
+KAP_ANCHOR_FRAME_BLOCKS = 80
+KAP_ANCHOR_FRAME_STRIDE = 37
 KAP_LISTING_TYPES = ("ODA", "CA")   # material events and structured corporate-action forms
 KAP_THROTTLE_SECONDS = 11           # free plan: 6 calls/minute
 KAP_TARGET_CLASSES = ("ODA",)
 KAP_LISTED_MEMBER_MARK = "IGS"      # "İşlem Gören Şirket": listed company
 #: How many times a disclosure detail the gateway refuses is asked for again.
 KAP_MAX_DETAIL_ATTEMPTS = 3
-#: Largest share of sampled disclosures that may be unavailable for the sample
-#: still to be analysed. Above it the run refuses; at or below it the run
-#: proceeds and records exactly which disclosures are missing.
-KAP_MAX_UNAVAILABLE_SHARE = 0.01
+#: A census with a hole is not a census. The run needs every target
+#: disclosure retrieved. The one exception: a disclosure the gateway refused
+#: on ``KAP_MAX_DETAIL_ATTEMPTS`` separate days is accepted as unavailable, up
+#: to this share of targets, and is listed by number in the manifest. v2
+#: allowed 1% after a single attempt; with categories of 30 events that could
+#: have been most of a category.
+KAP_MAX_UNAVAILABLE_SHARE = 0.001
+KAP_MIN_ATTEMPT_DAYS = 3
 
 # -- Event study ---------------------------------------------------------------
 EVENT_WINDOWS = (
@@ -61,6 +78,29 @@ ALPHA = 0.05
 #: Below these an estimate is reported as data_insufficient, never tested.
 MIN_EVENTS_PER_GROUP = 30
 MIN_EVENT_DATES_PER_GROUP = 15
+
+# -- H7, protocol v3 -----------------------------------------------------------
+#: Draws and seed of the wild cluster bootstrap. With 9,999 draws the smallest
+#: attainable p-value is 0.0001, far below the 0.0056 a lone test must reach.
+WILD_BOOTSTRAP_DRAWS = 9999
+WILD_BOOTSTRAP_SEED = 20261011
+#: A category is tested only if it has this many events, on this many
+#: distinct day-0 sessions, from this many distinct issuers, after an issuer's
+#: overlapping events have been thinned to one. v2 had no issuer rule.
+H7_MIN_EVENTS = 30
+H7_MIN_DATES = 20
+H7_MIN_ISSUERS = 20
+#: The reference group must be larger: every contrast is taken against it.
+H7_REFERENCE_MIN_EVENTS = 60
+H7_REFERENCE_MIN_DATES = 30
+H7_REFERENCE_MIN_ISSUERS = 30
+
+# -- Prices, protocol v3 -------------------------------------------------------
+#: A return enters the study only if two providers agree on it to within this
+#: many return points. The readiness audit found the primary provider's close
+#: was not the closing price for most stocks on 16 dates; the cleaning rules
+#: caught 26 of about 1,150 wrong returns.
+RECONCILE_TOLERANCE = 0.01
 
 # -- Costs (scenarios, not measured fees) --------------------------------------
 ROUND_TRIP_COST_SCENARIOS = (0.003, 0.004, 0.005)

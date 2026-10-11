@@ -98,6 +98,10 @@ class Context:
     sealed: Optional[str] = None
     frame_complete: bool = True
     limit_rules: Optional[List[Dict[str, Any]]] = None
+    #: False on a real-data context whose gates have not all passed
+    #: (``pipeline.gates``). Counts and diagnostics may still be read from it;
+    #: no hypothesis will compute an outcome on it.
+    outcomes_allowed: bool = True
 
     @property
     def origin(self) -> str:
@@ -114,7 +118,16 @@ class Context:
         return bool(entry.get("available")), str(entry.get("reason", ""))
 
 
+class OutcomesNotAllowed(RuntimeError):
+    """A hypothesis was asked to run on real data before its gates passed."""
+
+
 def base_result(spec: Spec, ctx: Context) -> Dict[str, Any]:
+    # Every hypothesis starts here, so this is where a real-data run that has
+    # not passed its gates stops: before any return is read.
+    if ctx.origin == ORIGIN_REAL and not ctx.outcomes_allowed:
+        raise OutcomesNotAllowed(
+            f"{spec.id}: the real-data gates have not passed; see pipeline.gates()")
     return {
         "hypothesis": spec.id, "title": spec.title, "claim": spec.claim,
         "data_origin": ctx.origin, "frame_complete": ctx.frame_complete,

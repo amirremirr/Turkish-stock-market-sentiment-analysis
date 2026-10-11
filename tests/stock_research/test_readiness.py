@@ -29,13 +29,15 @@ CLOSED_2023 = {
     "2023-04-21", "2023-05-01", "2023-05-19", "2023-06-28", "2023-06-29",
     "2023-06-30", "2023-08-30",
 }
+#: 25 December was a session; the benchmark's provider has no bar for it.
+DATA_GAPS_2023 = {"2023-12-25"}
 HALF_DAYS_2023 = {"2023-04-20", "2023-06-27"}        # arife: closing session 12:30-12:40
 
 
 def _calendar_2023() -> cal.SessionCalendar:
     day, sessions = date(2023, 1, 2), []
     while day <= date(2023, 12, 29):
-        if day.weekday() < 5 and day.isoformat() not in CLOSED_2023:
+        if day.weekday() < 5 and day.isoformat() not in CLOSED_2023 | DATA_GAPS_2023:
             sessions.append(day.isoformat())
         day += timedelta(days=1)
     return cal.SessionCalendar(sessions)
@@ -256,36 +258,43 @@ def test_half_day_afternoon_is_never_given_the_same_session(half_day, next_sessi
     calendar = _calendar_2023()
     morning = calendar.actionable(_at(f"{half_day} 11:00:00"))
     assert (morning.day0, morning.bucket) == (half_day, cal.BUCKET_DURING)
-    # After the early close the filing waits for the next session; it is
-    # flagged because the early close is inferred, not recorded, for 2023.
+    # After the early close the filing waits for the next session. Under v2
+    # the early close was inferred and the row flagged ambiguous; v3 records
+    # the 2023 half days, so the timing is known.
     afternoon = calendar.actionable(_at(f"{half_day} 14:00:00"))
     assert (afternoon.day0, afternoon.bucket) == (next_session, cal.BUCKET_POST_CLOSE)
-    assert afternoon.timing_ambiguous
+    assert not afternoon.timing_ambiguous
     evening = calendar.actionable(_at(f"{half_day} 18:30:00"))
     assert (evening.day0, evening.timing_ambiguous) == (next_session, False)
 
 
-def test_half_day_closing_auction_is_treated_as_after_the_close():
-    """The half-day closing session ran 12:30-12:40. The rule cuts at 12:30, so
-    a filing in those ten minutes is delayed and flagged, never advanced."""
+def test_half_day_closing_session_runs_to_12_40():
+    """On a half day continuous trading ended at 12:30 and the closing session
+    at 12:40. v2 cut at 12:30 (readiness finding C-4); v3 records 12:40, the
+    counterpart of 18:10 on a full day."""
 
-    result = _calendar_2023().actionable(_at("2023-04-20 12:35:00"))
-    assert (result.day0, result.timing_ambiguous) == ("2023-04-24", True)
+    calendar = _calendar_2023()
+    inside = calendar.actionable(_at("2023-04-20 12:35:00"))
+    assert (inside.day0, inside.bucket, inside.timing_ambiguous) == (
+        "2023-04-20", cal.BUCKET_DURING, False)
+    after = calendar.actionable(_at("2023-04-20 12:40:01"))
+    assert (after.day0, after.bucket, after.timing_ambiguous) == (
+        "2023-04-24", cal.BUCKET_POST_CLOSE, False)
 
 
 @pytest.mark.parametrize("full_day", ["2023-02-07", "2023-04-28", "2023-05-18",
-                                      "2023-08-29"])
-def test_full_sessions_before_a_closure_are_wrongly_assumed_half_days(full_day):
-    """Known limitation, kept visible: the 2023 rule infers a half day from a
-    closure on the next weekday. These four sessions ran to 18:10, yet an
-    afternoon filing is delayed to the next session and flagged ambiguous. H7
-    drops ambiguous rows, so the cost is lost events, not mistimed ones."""
+                                      "2023-08-29", "2023-12-22", "2023-12-29"])
+def test_full_sessions_before_a_closure_are_no_longer_taken_for_half_days(full_day):
+    """Readiness finding C-2: v2 inferred a half day from a closure on the next
+    weekday and delayed afternoon filings on six full sessions of 2023. With
+    the schedule recorded, an afternoon filing on those days is what it was:
+    published during the session."""
 
     calendar = _calendar_2023()
     assert full_day not in HALF_DAYS_2023
     result = calendar.actionable(_at(f"{full_day} 15:00:00"))
-    assert result.bucket == cal.BUCKET_POST_CLOSE and result.timing_ambiguous
-    assert result.day0 == calendar.after(full_day)
+    assert (result.day0, result.bucket, result.timing_ambiguous) == (
+        full_day, cal.BUCKET_DURING, False)
 
 
 def test_timestamps_are_read_in_istanbul_time():
@@ -315,7 +324,8 @@ def test_the_code_still_is_the_registered_protocol():
 
     if registry.PROTOCOL_VERSION in REGISTERED:
         assert registry.protocol_hash() == REGISTERED[registry.PROTOCOL_VERSION]
-    assert registry.SUPERSEDES["protocol_hash"].startswith("92366aa0a6342e9c")
+    assert registry.LINEAGE[0]["protocol_hash"].startswith("92366aa0a6342e9c")
+    assert registry.SUPERSEDES["protocol_hash"] == REGISTERED["stock-research-protocol-v2"]
 
 
 def test_the_audit_code_is_outside_the_fingerprint():

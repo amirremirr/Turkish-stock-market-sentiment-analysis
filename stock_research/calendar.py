@@ -22,11 +22,20 @@ happened before publication, so day 0 is not a tradable window for those
 events. ``post_close``, ``pre_open`` and ``weekend_or_holiday`` are the buckets
 with a clean first reaction.
 
-Half days. Official early closes are known for 2025-2026 (``config``). For
-other years they are not recorded anywhere in this repository, so a
-publication after 12:30 on a session immediately followed by a weekday closure
-is treated as after the close and flagged ``timing_ambiguous``. That can delay
-day 0; it cannot advance it.
+Half days and closures. For 2023, the year of the KAP sample, the exchange's
+schedule is recorded here (``EXCHANGE_SCHEDULE``): the two half days, the
+official holidays, the session whose trades were cancelled and the closure
+that followed it. A year in the schedule is read from it and nothing is
+inferred. For 2025-2026 the early closes come from the repository ``config``.
+For any other year a publication after 12:30 on a session immediately followed
+by a weekday closure is treated as after the close and flagged
+``timing_ambiguous``, which can delay day 0 and cannot advance it.
+
+Closures that were not scheduled. A filing made while the exchange was shut
+for an emergency is dated to the session it reopened on, days later and for
+every stock at once. That session's return is the market's reaction to the
+emergency, not a stock's reaction to its filing. Such events are flagged
+``closure_delayed`` so a study can leave them out.
 """
 
 from __future__ import annotations
@@ -34,7 +43,7 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -50,7 +59,28 @@ BUCKET_UNKNOWN = "unknown"
 #: Buckets whose day 0 starts from a price formed before the news.
 CLEAN_REACTION_BUCKETS = frozenset({BUCKET_PRE_OPEN, BUCKET_POST_CLOSE, BUCKET_NON_SESSION})
 
-CALENDAR_RULE_VERSION = "stock-session-calendar-v1"
+CALENDAR_RULE_VERSION = "stock-session-calendar-v2"
+
+#: Borsa Istanbul equity market. Official holidays and half days: "2023 Yili
+#: Resmi Tatil Gunleri Nedeniyle Borsa Piyasa ve Pazarlarinda Uygulanacak
+#: Islem, Tescil ve Takas Esaslari", no. E-18454353-100.04.02-13031 of
+#: 2022-12-07, and member notices relaying its equity-market table. On a half
+#: day continuous trading ends at 12:30 and the closing session at 12:40.
+#: Cancelled session and closure: trades of 2023-02-08 were annulled after the
+#: 6 February earthquakes and the market reopened on 2023-02-15 (sources in
+#: ``data/prices.py``). Weekend holidays are not listed: they are never
+#: sessions.
+EXCHANGE_SCHEDULE: Dict[str, Dict[str, Any]] = {
+    "2023": {
+        "half_days": {"2023-04-20": "12:40", "2023-06-27": "12:40"},
+        "holidays": ("2023-04-21", "2023-05-01", "2023-05-19", "2023-06-28",
+                     "2023-06-29", "2023-06-30", "2023-08-30"),
+        "cancelled_sessions": ("2023-02-08",),
+        "unscheduled_closures": ("2023-02-09", "2023-02-10", "2023-02-13", "2023-02-14"),
+        #: First session after an unscheduled closure.
+        "reopening_sessions": ("2023-02-15",),
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -60,6 +90,9 @@ class Actionable:
     timing_ambiguous: bool
     published_local: Optional[str]  # ISO timestamp, Europe/Istanbul
     published_utc: Optional[str]
+    #: Published before a session that reopened the market after an
+    #: unscheduled closure, and dated to that session.
+    closure_delayed: bool = False
 
 
 def parse_kap_time(raw: Optional[str]) -> Optional[datetime]:
@@ -122,6 +155,11 @@ class SessionCalendar:
     def _close_time(self, day: date) -> tuple[time, bool]:
         """(close, assumed) for a session day."""
 
+        scheduled = EXCHANGE_SCHEDULE.get(f"{day.year}")
+        if scheduled is not None:
+            early = scheduled["half_days"].get(day.isoformat())
+            return (time.fromisoformat(early), False) if early else (SESSION_CLOSE, False)
+
         from config import BIST_HALF_DAYS, BIST_HOLIDAYS
 
         covered_years = {entry[:4] for entry in BIST_HOLIDAYS}
@@ -154,7 +192,9 @@ class SessionCalendar:
             return Actionable(None, BUCKET_UNKNOWN, True, *stamps)
 
         if not self.is_session(anchor):
-            return Actionable(self.on_or_after(anchor), BUCKET_NON_SESSION, False, *stamps)
+            day0 = self.on_or_after(anchor)
+            return Actionable(day0, BUCKET_NON_SESSION, False, *stamps,
+                              closure_delayed=_reopening(day0))
         if local is None:
             return Actionable(self.after(anchor), BUCKET_UNKNOWN, True, *stamps)
 
@@ -167,4 +207,42 @@ class SessionCalendar:
         # After an *assumed* early close the true close may have been 18:10,
         # so the bucket itself is uncertain until the regular close has passed.
         ambiguous = assumed and moment <= SESSION_CLOSE
-        return Actionable(self.after(anchor), BUCKET_POST_CLOSE, ambiguous, *stamps)
+        day0 = self.after(anchor)
+        return Actionable(day0, BUCKET_POST_CLOSE, ambiguous, *stamps,
+                          closure_delayed=_reopening(day0))
+
+    def schedule_mismatches(self, year: str, known_gaps: Sequence[str] = ()) -> List[str]:
+        """Where the sessions in the data and the recorded schedule disagree.
+
+        Every weekday of *year* inside the calendar's range must either be a
+        session or be a recorded holiday, cancelled session or closure (or a
+        known gap in the benchmark's data); and no recorded closure may carry
+        a session. An empty list means the two agree.
+        """
+
+        scheduled = EXCHANGE_SCHEDULE.get(year)
+        if scheduled is None:
+            return [f"no schedule recorded for {year}"]
+        closed = set(scheduled["holidays"]) | set(scheduled["cancelled_sessions"]) \
+            | set(scheduled["unscheduled_closures"])
+        problems = []
+        day = date(int(year), 1, 1)
+        while day.year == int(year):
+            iso = day.isoformat()
+            if day.weekday() < 5 and self.first <= iso <= self.last:
+                if iso in closed and self.is_session(iso):
+                    problems.append(f"{iso}: recorded as closed but the data have a session")
+                if iso not in closed and not self.is_session(iso) and iso not in known_gaps:
+                    problems.append(f"{iso}: no session in the data and no recorded closure")
+            day += timedelta(days=1)
+        for iso in scheduled["half_days"]:
+            if self.covers(iso) and not self.is_session(iso):
+                problems.append(f"{iso}: recorded as a half day but the data have no session")
+        return problems
+
+
+def _reopening(day0: Optional[str]) -> bool:
+    if day0 is None:
+        return False
+    scheduled = EXCHANGE_SCHEDULE.get(day0[:4])
+    return scheduled is not None and day0 in scheduled["reopening_sessions"]

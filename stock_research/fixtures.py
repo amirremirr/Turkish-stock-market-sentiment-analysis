@@ -220,9 +220,10 @@ def news_context(*, effect: Optional[str] = None, seed: int = 11, sessions: int 
 
 def kap_context(*, effect: bool = False, seed: int = 21, sessions: int = 520,
                 per_category: int = 70, insider_buys: int = 90) -> Context:
-    """Categorised disclosures. With ``effect``: ``cat_up`` gains 3% over
-    days 0..+5, ``cat_down`` loses 2%, and insider purchases gain 4% over
-    days +1..+20."""
+    """Categorised disclosures. With ``effect``: new-contract filings gain 3%
+    over days 0..+5, dividend filings lose 2%, and insider purchases gain 4%
+    over days +1..+20. Procedural filings (the reference group of H7), buyback
+    filings and unclassified ones carry no effect."""
 
     rng = np.random.default_rng(seed)
     days = weekdays("2022-01-03", sessions)
@@ -246,9 +247,11 @@ def kap_context(*, effect: bool = False, seed: int = 21, sessions: int = 520,
             "is_correction": False, "insider_parse_status": None, "insider_side": None,
             "insider_value": None, "insider_role": None, "insider_venue": None, **extra})
 
-    for category, total in (("cat_up", 0.03), ("cat_down", -0.02), ("cat_flat_a", 0.0),
-                            ("cat_flat_b", 0.0), ("cat_flat_c", 0.0)):
-        for _ in range(per_category):
+    for category, total, count in (
+            ("new_contract", 0.03, per_category), ("dividend", -0.02, per_category),
+            ("administrative", 0.0, 2 * per_category), ("buyback", 0.0, per_category),
+            ("general_other", 0.0, per_category)):
+        for _ in range(count):
             ticker, index = place()
             if effect and total:
                 _spread(intraday, ticker, index, (0, 1, 2, 3, 4, 5), total)

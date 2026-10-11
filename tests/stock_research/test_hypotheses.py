@@ -65,7 +65,13 @@ def test_h7_and_h8_find_planted_effects_and_not_absent_ones(null_kap, effect_kap
         assert found(module.run(effect_kap))
         assert not found(module.run(null_kap))
     primary = h7.run(effect_kap)["primary"]
-    assert (primary["highest_category"], primary["lowest_category"]) == ("cat_up", "cat_down")
+    contrast = {row["class"]: row["contrast"] for row in primary["contrasts"]}
+    assert primary["tested_classes"] == ["buyback", "dividend", "new_contract"]
+    assert contrast["new_contract"] > 0.015 and contrast["dividend"] < -0.008
+    assert abs(contrast["buyback"]) < 0.012
+    assert "new_contract" in primary["significant_classes"]
+    assert "buyback" not in primary["significant_classes"]
+    assert primary["estimate"] >= 0.01 and primary["bootstrap"]["draws"] == 9999
 
 
 def test_h9_finds_a_planted_lead_and_not_an_absent_one():
@@ -252,7 +258,7 @@ def test_h7_drops_updates_corrections_and_mixed_days(null_kap):
     first = events.iloc[0]
     extra = pd.DataFrame([
         {**first, "event_id": "upd", "is_update": True, "ticker": "S001", "day0": first["day0"]},
-        {**first, "event_id": "mix", "category": "cat_down"},     # same ticker-day, other category
+        {**first, "event_id": "mix", "category": "dividend"},     # same ticker-day, other category
     ])
     ctx = common.Context(panel=null_kap.panel, kap_events=pd.concat([events, extra], ignore_index=True),
                          availability=null_kap.availability)

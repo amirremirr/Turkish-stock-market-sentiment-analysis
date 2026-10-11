@@ -182,8 +182,8 @@ def candidate_symbols(db_path=None) -> List[str]:
     with store.connect(db_path) as con:
         rows = con.execute(
             "SELECT DISTINCT d.sender_codes, d.related_stocks FROM sr_raw_kap_detail d "
-            "JOIN sr_raw_kap_listing l USING (disclosure_index) "
-            "WHERE l.frame_version = ?", (KAP_FRAME_VERSION,),
+            "JOIN sr_kap_frame_items i USING (disclosure_index) "
+            "WHERE i.frame_version = ? AND i.is_target = 1", (KAP_FRAME_VERSION,),
         ).fetchall()
     codes = sorted({code for row in rows
                     for code in sender_codes(row[0]) + related_codes(row[1])})
@@ -221,9 +221,9 @@ def primary_symbol(codes: Sequence[str], panel, day0: Optional[str]) -> Optional
 def load_details(db_path=None) -> pd.DataFrame:
     with store.connect(db_path) as con:
         return pd.read_sql_query(
-            "SELECT d.*, l.block_seq FROM sr_raw_kap_detail d "
-            "JOIN sr_raw_kap_listing l USING (disclosure_index) "
-            "WHERE l.frame_version = ? AND d.published_raw IS NOT NULL "
+            "SELECT d.*, i.block_seq FROM sr_raw_kap_detail d "
+            "JOIN sr_kap_frame_items i USING (disclosure_index) "
+            "WHERE i.frame_version = ? AND i.is_target = 1 AND d.published_raw IS NOT NULL "
             "ORDER BY d.disclosure_index", con, params=(KAP_FRAME_VERSION,),
         )
 
@@ -262,6 +262,7 @@ def build_kap_events(details: pd.DataFrame, panel) -> pd.DataFrame:
             "day0": action.day0,
             "bucket": action.bucket,
             "timing_ambiguous": action.timing_ambiguous,
+            "closure_delayed": action.closure_delayed,
             "disclosure_type": detail["disclosure_type"],
             "subject": detail["subject_tr"],
             "summary": detail["summary_tr"],

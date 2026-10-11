@@ -16,35 +16,71 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from stock_research import config, costs, entities, events, eventstudy, insider, limits, stats, store
 from stock_research import calendar as session_calendar
-from stock_research.data import prices
+from stock_research.data import prices, secondary
 from stock_research.hypotheses import common, h1, h2, h3, h4, h5, h6, h7, h8, h9
 from stock_research.hypotheses.common import Context
 
-PROTOCOL_VERSION = "stock-research-protocol-v2"
+PROTOCOL_VERSION = "stock-research-protocol-v3"
 
 #: The protocol this one replaces. It stays registered, and anything stored
-#: under it stays stored; v2 is a different study, not an edit of v1.
+#: under it stays stored; v3 is a different study, not an edit of v2. v2 was
+#: never run: the readiness audit of 2026-10-11 returned BLOCKED before any
+#: outcome was read (docs/stock_research/readiness/READINESS_DECISION.md).
 SUPERSEDES = {
-    "protocol_version": "stock-research-protocol-v1",
-    "protocol_hash": "92366aa0a6342e9c78c02700a7253b45e5dc4ce0cac6476467057164cb66dfb8",
-    "registered_at": "2026-10-11T00:15:04+00:00",
-    "code_commit": "ecdc532",
+    "protocol_version": "stock-research-protocol-v2",
+    "protocol_hash": "09e9382e77ec44bc06aaaf5c4bde0d64e06a6584d2aeb4b65ed35da0b2e7d99a",
+    "registered_at": "2026-10-11T08:39:14+00:00",
+    "code_commit": "df6be00",
     "real_results_under_it": 0,
 }
+#: Every protocol before this one, oldest first. None has a stored result.
+LINEAGE = (
+    {"protocol_version": "stock-research-protocol-v1",
+     "protocol_hash": "92366aa0a6342e9c78c02700a7253b45e5dc4ce0cac6476467057164cb66dfb8",
+     "registered_at": "2026-10-11T00:15:04+00:00", "code_commit": "ecdc532"},
+    dict(SUPERSEDES),
+)
 CHANGES_FROM_PREVIOUS = (
-    "The fingerprint now covers data/kap.py. The ingester decides which "
-    "disclosures are in the sample and what text is read from them, and v1 "
-    "left it out.",
-    "Sample completeness has two parts. An anchor with a refused disclosure "
-    "detail is incomplete_details, not complete; the run needs every anchor "
-    "attempted and at most 1% of sampled disclosures unavailable, and records "
-    "which ones are missing.",
-    "H8 counts a purchase only if the text states it was made on the exchange. "
-    "v1 assumed on-exchange unless the text said otherwise. Purchases with no "
-    "stated venue are a sensitivity analysis.",
-    "Each stored run records digests of the KAP sample, the price snapshot and "
-    "the member roster it was computed from, and the ingestion runs that built "
-    "the sample.",
+    "H7's joint p-value comes from a wild cluster bootstrap (null imposed, "
+    "Rademacher weights by day 0, 9,999 draws, fixed seed) of the two-way "
+    "clustered Wald statistic. v2 referred that statistic to F(q, G-1), which "
+    "rejected a true null about 10% of the time at the 5% level and 3% at the "
+    "Holm level on the projected sample.",
+    "H7 tests named classes of filing against a reference group of procedural "
+    "filings, one pre-specified contrast each. v2 tested whichever classes "
+    "reached 30 events against the largest one; most of those were residual "
+    "classes with no stated content.",
+    "A class is tested only with 30 events on 20 dates from 20 issuers, the "
+    "reference group with 60 on 30 from 30. v2 required 30 events on 15 dates "
+    "and had no issuer rule.",
+    "An issuer's H7 events are thinned so that no two outcome windows overlap. "
+    "v2 kept them all and reported thinning as a sensitivity.",
+    "H7's reported size is the largest contrast among those individually "
+    "significant after Holm adjustment, with a bias-corrected root-mean-square "
+    "contrast beside it. v2 reported the highest class mean minus the lowest, "
+    "which exceeds the 1% material effect in 85% of samples with no effect.",
+    "The sample is a census of the 2023 range, not 80 anchors of 50. Rows "
+    "stored under the anchor frame are members of the census and are reused.",
+    "A return enters the study only if a second provider's adjusted return "
+    "agrees with it within one percentage point; otherwise it is missing. On "
+    "corporate-action dates the adjusted return is tested against the price "
+    "limit as well.",
+    "The 2023 exchange schedule is recorded: two half days, the holidays, the "
+    "cancelled session and the closure after it. v2 inferred half days. "
+    "Filings dated to the session that reopened the market after the "
+    "unscheduled closure are excluded from H7.",
+    "Complete retrieval of target disclosures is required. A disclosure may be "
+    "accepted as unavailable only after three refusals on three separate days, "
+    "up to 0.1% of targets; v2 allowed 1% after one attempt. Every stored "
+    "detail must have a parseable timestamp and a subject.",
+    "The run refuses unless prices were requested from both sources for every "
+    "sampled issuer code and the sessions in the data match the recorded "
+    "schedule. The gates are carried by the real-data context, and no "
+    "hypothesis computes an outcome on a context whose gates have not passed; "
+    "in v2 the checks sat in one function the runners could be called around.",
+    "Constants read from the repository-root config (holiday lists, the "
+    "economic calendar, the KAP base URL) are digested into the protocol, and "
+    "library versions are recorded in every manifest.",
 )
 
 #: Files that cannot change a registered result: fixtures and the report
@@ -89,10 +125,30 @@ def code_fingerprint() -> Dict[str, str]:
     return out
 
 
+def external_constants() -> Dict[str, str]:
+    """Digests of the constants fingerprinted modules read from outside the
+    package: ``calendar`` reads the holiday lists, ``h4`` the economic
+    calendar and ``data.kap`` the gateway's address, all from the
+    repository-root ``config``. A change to any of them changes a result
+    without changing a line under ``stock_research/``."""
+
+    import config as root
+
+    def digest(value: Any) -> str:
+        return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+
+    return {"BIST_HOLIDAYS": digest(root.BIST_HOLIDAYS),
+            "BIST_HALF_DAYS": digest(root.BIST_HALF_DAYS),
+            "ECONOMIC_CALENDAR": digest(root.ECONOMIC_CALENDAR),
+            "KAP_BASE_URL": digest(root.KAP_BASE_URL)}
+
+
 def protocol_document() -> Dict[str, Any]:
     return {
         "protocol_version": PROTOCOL_VERSION,
         "supersedes": dict(SUPERSEDES),
+        "lineage": [dict(entry) for entry in LINEAGE],
+        "external_constants": external_constants(),
         "changes_from_previous": list(CHANGES_FROM_PREVIOUS),
         "code_fingerprint": code_fingerprint(),
         "family_size": common.FAMILY_SIZE,
@@ -128,15 +184,31 @@ def protocol_document() -> Dict[str, Any]:
             "limit_tolerance": limits.TOLERANCE,
             "round_trip_cost_scenarios": list(config.ROUND_TRIP_COST_SCENARIOS),
             "kap_frame": {
+                "kind": "census",
                 "first_index": config.KAP_FRAME_FIRST_INDEX,
                 "last_index": config.KAP_FRAME_LAST_INDEX,
-                "blocks": config.KAP_FRAME_BLOCKS,
+                "listing_page": config.KAP_LISTING_PAGE,
+                "earlier_frames_reused": list(config.KAP_EARLIER_FRAMES),
                 "listing_types": list(config.KAP_LISTING_TYPES),
                 "target_classes": list(config.KAP_TARGET_CLASSES),
                 "listed_member_mark": config.KAP_LISTED_MEMBER_MARK,
                 "max_detail_attempts": config.KAP_MAX_DETAIL_ATTEMPTS,
+                "min_attempt_days": config.KAP_MIN_ATTEMPT_DAYS,
                 "max_unavailable_share": config.KAP_MAX_UNAVAILABLE_SHARE,
             },
+            "h7": {
+                "min_events": config.H7_MIN_EVENTS, "min_dates": config.H7_MIN_DATES,
+                "min_issuers": config.H7_MIN_ISSUERS,
+                "reference_min_events": config.H7_REFERENCE_MIN_EVENTS,
+                "reference_min_dates": config.H7_REFERENCE_MIN_DATES,
+                "reference_min_issuers": config.H7_REFERENCE_MIN_ISSUERS,
+                "bootstrap_draws": config.WILD_BOOTSTRAP_DRAWS,
+                "bootstrap_seed": config.WILD_BOOTSTRAP_SEED,
+            },
+            "reconcile_tolerance": config.RECONCILE_TOLERANCE,
+            "action_limit_tolerance": prices.ACTION_LIMIT_TOLERANCE,
+            "second_price_source": secondary.SOURCE,
+            "exchange_schedule": session_calendar.EXCHANGE_SCHEDULE,
             "sealed_index_boundary": config.SEALED_INDEX_BOUNDARY,
             "subject_categories": events.SUBJECT_CATEGORIES,
             "general_summary_rules": [[c, list(p)] for c, p in events.GENERAL_SUMMARY_RULES],

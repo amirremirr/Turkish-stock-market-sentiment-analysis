@@ -138,6 +138,21 @@ def figures(result: Dict[str, Any]) -> List[str]:
             ax.plot([0, 1], [0, 1], color=_GREY, ls="--", lw=0.8)
             out.append(_png(fig, origin))
     if key == "H7":
+        contrasts = [c for c in (result.get("primary") or {}).get("contrasts", [])
+                     if c.get("contrast") is not None]
+        if contrasts:
+            fig, ax = _axes("Class mean CAR(0,+5) minus the reference group (procedural filings)",
+                            ylabel="contrast")
+            names = [c["class"].replace("_", " ") for c in contrasts]
+            errors = [1.96 * c["se"] if c.get("se") else 0 for c in contrasts]
+            ax.bar(names, [c["contrast"] for c in contrasts], yerr=errors, color=_BLUE,
+                   alpha=0.85, capsize=3)
+            for i, c in enumerate(contrasts):
+                if c.get("p_holm") is not None:
+                    ax.text(i, 0, f"p={c['p_holm']:.3f}", ha="center", va="bottom", fontsize=7)
+            ax.axhline(0, color="black", lw=0.8)
+            ax.tick_params(axis="x", labelsize=7)
+            out.append(_png(fig, origin))
         cells = [c for c in result["exploratory"] if c.get("mean") is not None and "category" in c]
         if cells:
             categories = sorted({c["category"] for c in cells})

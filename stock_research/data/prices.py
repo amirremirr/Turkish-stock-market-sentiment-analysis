@@ -29,6 +29,19 @@ Three rules run through this module:
   close-to-close return there is a two-day return on both sides, which keeps
   abnormal returns valid, while same-day quantities (the gap, the
   prior-close move used for price limits) are withheld on the merged session.
+* **A return two sources disagree on is not a return.** (Protocol v3.) Where a
+  second provider's closes are supplied, a return is kept only if the second
+  provider's adjusted close-to-close return over the same sessions is within
+  ``RECONCILE_TOLERANCE`` of it. If the two differ it is flagged
+  ``source_disagreement``; if the second provider has no return to compare it
+  is flagged ``no_second_source``. Either way it is set to missing: nothing is
+  taken from the second source and nothing unverified is kept. A window that
+  contains such a return has no CAR, and the event is counted as lost.
+* **A corporate action does not excuse an impossible move.** (Protocol v3.) On
+  a date with a recorded dividend or split the adjusted return is tested
+  against the price limit as well. The exchange applies its limit to the
+  adjusted base price, so an adjusted move beyond it means a wrong adjustment
+  factor. It is flagged ``adjusted_move_beyond_price_limit``.
 """
 
 from __future__ import annotations
@@ -41,9 +54,16 @@ import pandas as pd
 
 from stock_research import store
 from stock_research.calendar import SessionCalendar
+from stock_research.config import RECONCILE_TOLERANCE
 
 BAR_COLUMNS = ["open", "high", "low", "close", "adj_close", "volume", "dividend", "split_ratio"]
-PRICE_RULE_VERSION = "stock-price-rules-v2"
+PRICE_RULE_VERSION = "stock-price-rules-v3"
+#: Slack for the limit test on corporate-action dates: the limit price is
+#: rounded to the tick from an adjusted base that is itself rounded.
+ACTION_LIMIT_TOLERANCE = 0.01
+ISSUE_DISAGREEMENT = "source_disagreement"
+ISSUE_UNVERIFIED = "no_second_source"
+ISSUE_ACTION_LIMIT = "adjusted_move_beyond_price_limit"
 
 #: Sessions whose trades were annulled by the exchange. A provider may still
 #: serve a bar for them; using it would measure the next return from a price
@@ -233,6 +253,8 @@ class Panel:
     calendar_gaps: List[str] = field(default_factory=list)
     #: Sessions that absorbed one or more of those dates.
     merged_sessions: List[str] = field(default_factory=list)
+    #: What the two-source check did. Empty when no second source was given.
+    reconciliation: Dict[str, Any] = field(default_factory=dict)
 
     def frame(self, ticker: str) -> Optional[pd.DataFrame]:
         return self.bars.get(ticker)
@@ -243,8 +265,14 @@ class Panel:
 
 
 def derive(frame: pd.DataFrame, sessions: Sequence[str], *, is_benchmark: bool = False,
-           merged: Sequence[str] = ()) -> tuple[pd.DataFrame, List[Dict[str, Any]]]:
-    """Align one ticker to *sessions* and add returns, with missing states."""
+           merged: Sequence[str] = (), reconcile: bool = False,
+           second: Optional[pd.DataFrame] = None,
+           tolerance: float = RECONCILE_TOLERANCE) -> tuple[pd.DataFrame, List[Dict[str, Any]]]:
+    """Align one ticker to *sessions* and add returns, with missing states.
+
+    With ``reconcile`` every return is checked against ``second`` (a frame
+    with ``close_adjusted``); see the module docstring for the rule.
+    """
 
     issues = validate_bars(frame)
     if not is_benchmark:
@@ -287,6 +315,28 @@ def derive(frame: pd.DataFrame, sessions: Sequence[str], *, is_benchmark: bool =
         same_day_ok = same_day_ok & ~forbidden
         raw_ret = raw_ret.where(same_day_ok)
 
+        impossible = (action & (ret.abs() > limit + ACTION_LIMIT_TOLERANCE)).fillna(False)
+        for day in aligned.index[impossible.to_numpy()]:
+            issues.append({"date": day, "issue": ISSUE_ACTION_LIMIT})
+        ret = ret.mask(impossible)
+
+    aligned["verified"] = np.nan
+    if reconcile:
+        if second is None or second.empty:
+            other = pd.Series(np.nan, index=aligned.index)
+        else:
+            close = second["close_adjusted"].reindex(list(sessions)).astype(float)
+            other = close / close.shift(1) - 1.0
+        have = ret.notna()
+        disagree = have & other.notna() & ((ret - other).abs() > tolerance)
+        unverified = have & other.isna()
+        for day in aligned.index[disagree.to_numpy()]:
+            issues.append({"date": day, "issue": ISSUE_DISAGREEMENT})
+        for day in aligned.index[unverified.to_numpy()]:
+            issues.append({"date": day, "issue": ISSUE_UNVERIFIED})
+        aligned["verified"] = (have & ~disagree & ~unverified).where(have)
+        ret = ret.mask(disagree | unverified)
+
     aligned["ret"] = ret
     aligned["corporate_action"] = action
     aligned["gap"] = np.log(aligned["open"] / prior_close).where(same_day_ok)
@@ -297,7 +347,9 @@ def derive(frame: pd.DataFrame, sessions: Sequence[str], *, is_benchmark: bool =
 
 
 def build_panel(frames: Dict[str, pd.DataFrame], benchmark: str, *, origin: str,
-                snapshot_id: str) -> Panel:
+                snapshot_id: str,
+                secondary: Optional[Dict[str, pd.DataFrame]] = None,
+                tolerance: float = RECONCILE_TOLERANCE) -> Panel:
     if benchmark not in frames or frames[benchmark].empty:
         raise ValueError(f"benchmark {benchmark!r} has no bars; no calendar can be built")
     cleaned: Dict[str, pd.DataFrame] = {}
@@ -331,18 +383,103 @@ def build_panel(frames: Dict[str, pd.DataFrame], benchmark: str, *, origin: str,
                       if count >= CALENDAR_GAP_SHARE * len(stocks))
     merged = sorted({calendar.on_or_after(day) for day in gaps} - {None})
 
+    reconcile = secondary is not None
     bars: Dict[str, pd.DataFrame] = {}
     for ticker, frame in cleaned.items():
+        second = None
+        if reconcile and ticker in secondary:
+            second = secondary[ticker]
+            second = second[~second.index.isin(list(CANCELLED_SESSIONS))]
         bars[ticker], found = derive(frame, calendar.sessions,
-                                     is_benchmark=(ticker == benchmark), merged=merged)
+                                     is_benchmark=(ticker == benchmark), merged=merged,
+                                     reconcile=reconcile, second=second, tolerance=tolerance)
         if found:
             issues.setdefault(ticker, []).extend(found)
+    summary: Dict[str, Any] = {}
+    if reconcile:
+        counted = {ISSUE_DISAGREEMENT: 0, ISSUE_UNVERIFIED: 0, ISSUE_ACTION_LIMIT: 0}
+        for found in issues.values():
+            for issue in found:
+                if issue["issue"] in counted:
+                    counted[issue["issue"]] += 1
+        verified = int(sum(int(frame["ret"].notna().sum()) for frame in bars.values()))
+        missing = sorted(t for t in cleaned if t not in secondary or secondary[t].empty)
+        summary = {
+            "tolerance": tolerance, "returns_verified": verified,
+            "returns_set_missing_for_disagreement": counted[ISSUE_DISAGREEMENT],
+            "returns_set_missing_for_no_second_source": counted[ISSUE_UNVERIFIED],
+            "returns_set_missing_on_action_dates": counted[ISSUE_ACTION_LIMIT],
+            "tickers_without_second_source": missing,
+            "benchmark_has_second_source": benchmark not in missing,
+        }
     return Panel(calendar, bars, benchmark, origin, snapshot_id, issues,
-                 calendar_gaps=gaps, merged_sessions=merged)
+                 calendar_gaps=gaps, merged_sessions=merged, reconciliation=summary)
+
+
+def action_consistency(panel: Panel, actions: pd.DataFrame) -> Dict[str, Any]:
+    """Do the two providers record the same corporate actions, and do they
+    agree on the return across each?
+
+    For every capital increase and dividend the second provider lists, and
+    every dividend or split the first records: whether the other provider has
+    a counterpart within one session, and what became of the return on that
+    session (verified, or set to missing and why). No event of the disclosure
+    sample is involved.
+    """
+
+    from stock_research.data.secondary import CAPITAL_KINDS, KIND_DIVIDEND
+
+    sessions = panel.calendar.sessions
+    rows: List[Dict[str, Any]] = []
+    listed: Dict[str, set] = {}
+    for action in actions.to_dict("records"):
+        frame = panel.frame(action["ticker"])
+        position = panel.calendar.index(action["action_date"])
+        if frame is None or position is None:
+            continue
+        listed.setdefault(action["ticker"], set()).add(position)
+        near = frame.iloc[max(0, position - 1):position + 2]
+        reasons = [i["issue"] for i in panel.issues.get(action["ticker"], [])
+                   if i["date"] == sessions[position]]
+        state = ("verified" if frame["verified"].iloc[position] == 1.0 else
+                 next((r for r in reasons if r in (ISSUE_DISAGREEMENT, ISSUE_UNVERIFIED,
+                                                   ISSUE_ACTION_LIMIT)), "no_return"))
+        rows.append({"ticker": action["ticker"], "date": sessions[position],
+                     "listed_by": "second", "kind": action["kind"],
+                     "other_provider_records_it": bool(near["corporate_action"].any()),
+                     "return": state})
+    for ticker, frame in panel.bars.items():
+        if ticker == panel.benchmark:
+            continue
+        for position in np.flatnonzero(frame["corporate_action"].to_numpy()):
+            theirs = listed.get(ticker, set())
+            if not ({position - 1, position, position + 1} & theirs):
+                rows.append({"ticker": ticker, "date": sessions[position], "listed_by": "first",
+                             "kind": "split" if (frame["split_ratio"].iloc[position] or 0) else
+                             "dividend", "other_provider_records_it": False,
+                             "return": "verified" if frame["verified"].iloc[position] == 1.0
+                             else "not_verified"})
+    table = pd.DataFrame(rows, columns=["ticker", "date", "listed_by", "kind",
+                                        "other_provider_records_it", "return"])
+    second = table[table["listed_by"] == "second"]
+    summary: Dict[str, Any] = {"actions_listed_by_second_provider": int(len(second)),
+                               "actions_only_the_first_provider_records": int(
+                                   (table["listed_by"] == "first").sum())}
+    for label, kinds in (("capital_increases", CAPITAL_KINDS), ("cash_dividends", (KIND_DIVIDEND,))):
+        part = second[second["kind"].isin(kinds)]
+        summary[label] = {
+            "listed": int(len(part)),
+            "recorded_by_first_provider": int(part["other_provider_records_it"].sum()),
+            "return_by_state": part["return"].value_counts().to_dict()}
+    return {"summary": summary, "rows": table.to_dict("records")}
 
 
 def load_panel(snapshot_id: str, benchmark: str, db_path=None, *,
-               origin: str = ORIGIN_REAL) -> Panel:
+               origin: str = ORIGIN_REAL,
+               secondary_snapshot: Optional[str] = None) -> Panel:
+    """The analysis panel of one primary snapshot. With *secondary_snapshot*
+    every return is reconciled against that second-source snapshot."""
+
     with store.connect(db_path) as con:
         table = pd.read_sql_query(
             "SELECT ticker, date, open, high, low, close, adj_close, volume, "
@@ -353,4 +490,10 @@ def load_panel(snapshot_id: str, benchmark: str, db_path=None, *,
         ticker: group.drop(columns="ticker").set_index("date")
         for ticker, group in table.groupby("ticker")
     }
-    return build_panel(frames, benchmark, origin=origin, snapshot_id=snapshot_id)
+    second = None
+    if secondary_snapshot is not None:
+        from stock_research.data import secondary
+
+        second, _ = secondary.load(secondary_snapshot, db_path)
+    return build_panel(frames, benchmark, origin=origin, snapshot_id=snapshot_id,
+                       secondary=second)

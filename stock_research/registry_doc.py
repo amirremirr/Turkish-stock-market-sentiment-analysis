@@ -27,6 +27,14 @@ def render() -> str:
         f"{common.FAMILY_SIZE} hypotheses, Holm-adjusted together whether or not all "
         "can run.",
         "",
+        f"It replaces `{registry.SUPERSEDES['protocol_version']}` "
+        f"(`{registry.SUPERSEDES['protocol_hash'][:16]}…`, registered "
+        f"{registry.SUPERSEDES['registered_at']}), under which "
+        f"{registry.SUPERSEDES['real_results_under_it']} real results were stored. A "
+        "protocol is in force only once its hash is in `sr_protocols`; until then "
+        "these specifications are a candidate. What changed is in "
+        "`docs/stock_research/protocol_v3/CHANGES_FROM_V2.md`.",
+        "",
         "## Verdict rule",
         "",
         registry.VERDICT_RULE.capitalize(),

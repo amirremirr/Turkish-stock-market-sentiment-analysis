@@ -327,15 +327,17 @@ def test_raw_tables_are_append_only_and_separate_from_the_index_database(tmp_pat
         connection.close()
 
 
-def test_kap_frame_is_fixed_evenly_spaced_and_fully_ordered():
-    blocks = kap.frame_blocks()
-    starts = [b["block_start"] for b in blocks]
-    gaps = {b - a for a, b in zip(starts, starts[1:])}
-    assert len(blocks) == 80 and starts == sorted(starts) and max(gaps) - min(gaps) <= 1
-    assert sorted(b["process_order"] for b in blocks) == list(range(80))
-    # The first twenty processed already span most of the range.
-    early = sorted(b["block_seq"] for b in blocks if b["process_order"] < 20)
-    assert early[0] <= 4 and early[-1] >= 75
+def test_kap_frame_starts_at_the_first_index_of_the_range(tmp_path):
+    from stock_research import config
+
+    path = str(tmp_path / "f.db")
+    kap.ensure_frame(path)
+    kap.ensure_frame(path)                                 # idempotent
+    with store.connect(path) as con:
+        rows = [tuple(r) for r in con.execute(
+            "SELECT frame_version, block_seq, block_start, status FROM sr_kap_frame")]
+    assert rows == [(config.KAP_FRAME_VERSION, 0, config.KAP_FRAME_FIRST_INDEX, "pending")]
+    assert config.KAP_FRAME_VERSION == "kap-census-2023-v3"
 
 
 def test_kap_body_text_keeps_turkish_and_drops_english():

@@ -85,26 +85,29 @@ def test_h7_ignores_price_triggered_disclosures():
     days = F.weekdays("2022-01-03", 520)
     names = [f"S{n:03d}" for n in range(60)]
     flat = F.make_panel(days, names, seed=9)
-    rows = _kap_rows(flat, [("cat_a", "post_close", 60), ("cat_b", "post_close", 60),
-                            ("cat_c", "post_close", 60), ("unusual_price_volume", "post_close", 60)])
+    rows = _kap_rows(flat, [("administrative", "post_close", 110), ("buyback", "post_close", 60),
+                            ("new_contract", "post_close", 60),
+                            ("unusual_price_volume", "post_close", 60)])
     position = {d: i for i, d in enumerate(days)}
     effects = {(r.ticker, position[r.day0]): 0.08 for r in rows.itertuples()
                if r.category == "unusual_price_volume"}
     panel = F.make_panel(days, names, seed=9, intraday_effects=effects)
     ctx = common.Context(panel=panel, kap_events=rows, availability=F.ALL_AVAILABLE)
     result = h7.run(ctx)
-    assert "unusual_price_volume" not in result["sufficiency"]["counts"]["by_category"]
+    assert "unusual_price_volume" not in result["sufficiency"]["counts"]["by_group"]
+    assert result["sufficiency"]["counts"]["tested_classes"] == ["buyback", "new_contract"]
     assert result["primary"]["p"] > 0.01
 
 
 def test_h7_primary_uses_only_events_whose_day0_starts_before_publication():
     panel = F.make_panel(F.weekdays("2022-01-03", 520), [f"S{n:03d}" for n in range(60)], seed=4)
-    rows = _kap_rows(panel, [("cat_a", "post_close", 40), ("cat_a", "during_session", 40),
-                             ("cat_b", "pre_open", 40), ("cat_c", "post_close", 40)])
+    rows = _kap_rows(panel, [("administrative", "post_close", 40),
+                             ("administrative", "during_session", 40),
+                             ("buyback", "pre_open", 40), ("new_contract", "post_close", 40)])
     ctx = common.Context(panel=panel, kap_events=rows, availability=F.ALL_AVAILABLE)
     clean, counts = h7.prepare(ctx)
     assert set(clean["bucket"]) == {"post_close", "pre_open"}
-    assert counts["clean_reaction_timing"] <= counts["not_price_triggered"] - 35
+    assert counts["clean_reaction_timing"] <= counts["in_registered_classes"] - 35
     everything, _ = h7.prepare(ctx, clean_timing=False)
     assert "during_session" in set(everything["bucket"])
 

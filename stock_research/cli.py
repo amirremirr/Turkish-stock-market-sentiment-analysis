@@ -1,8 +1,10 @@
 """Command line for the stock-level study.
 
     python -m stock_research.cli status           what is stored, what is registered
-    python -m stock_research.cli ingest-kap       resume the KAP sample (slow: 6 calls/minute)
+    python -m stock_research.cli ingest-kap       resume the KAP census (slow: 6 calls/minute)
     python -m stock_research.cli ingest-prices    fetch bars for sampled issuers
+    python -m stock_research.cli ingest-prices-secondary   second source, for reconciliation
+    python -m stock_research.cli gates            every precondition of a real-data run
     python -m stock_research.cli describe         sample counts; reads no return
     python -m stock_research.cli register         register the current protocol
     python -m stock_research.cli run              the registered real-data run (refuses if not ready)
@@ -32,8 +34,8 @@ def _print(value) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=[
-        "status", "ingest-kap", "ingest-prices", "describe", "register", "run", "demo",
-        "report", "evaluate-linker"])
+        "status", "ingest-kap", "ingest-prices", "ingest-prices-secondary", "gates",
+        "describe", "register", "run", "demo", "report", "evaluate-linker"])
     parser.add_argument("--db")
     parser.add_argument("--max-hours", type=float, default=8.0)
     args = parser.parse_args(argv)
@@ -53,6 +55,13 @@ def main(argv=None) -> int:
         _print(kap.run(args.db, max_hours=args.max_hours))
     elif args.command == "ingest-prices":
         _print(pipeline.ingest_prices(args.db))
+    elif args.command == "ingest-prices-secondary":
+        _print(pipeline.ingest_secondary_prices(args.db))
+    elif args.command == "gates":
+        found = pipeline.gates(args.db)
+        _print({"gates": found, "price_coverage": pipeline.price_coverage(args.db),
+                "details": kap.verify_details(args.db)})
+        return 0 if not pipeline.failed_gates(found) else 3
     elif args.command == "describe":
         ctx, meta = pipeline.real_context(args.db)
         _print(pipeline.describe(ctx, meta))

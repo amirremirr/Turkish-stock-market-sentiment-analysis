@@ -45,26 +45,30 @@ def test_new_protocol_version_and_changelog_leave_the_old_registration_alone(tmp
     with store.connect(path) as con:
         con.execute("INSERT INTO sr_protocols VALUES (?,?,?,?)",
                     (old_hash, "stock-research-protocol-v1", "{}", old_time))
-    assert registry.PROTOCOL_VERSION == "stock-research-protocol-v2"
+    assert registry.PROTOCOL_VERSION == "stock-research-protocol-v3"
     document = registry.protocol_document()
-    assert document["supersedes"]["protocol_version"] == "stock-research-protocol-v1"
+    assert document["supersedes"]["protocol_version"] == "stock-research-protocol-v2"
+    assert [e["protocol_version"] for e in document["lineage"]] == [
+        "stock-research-protocol-v1", "stock-research-protocol-v2"]
     assert len(document["changes_from_previous"]) >= 3
     registry.register(path)
     with store.connect(path) as con:
         rows = {r["protocol_hash"]: (r["version"], r["registered_at"])
                 for r in con.execute("SELECT * FROM sr_protocols")}
         assert rows[old_hash] == ("stock-research-protocol-v1", old_time)
-        assert rows[registry.protocol_hash()][0] == "stock-research-protocol-v2"
+        assert rows[registry.protocol_hash()][0] == "stock-research-protocol-v3"
         with pytest.raises(sqlite3.IntegrityError):
             con.execute("DELETE FROM sr_protocols WHERE protocol_hash = ?", (old_hash,))
 
 
 # -- 2. Ingestion completeness is not detail completeness -----------------------
 class _Gateway:
-    """A stand-in for the KAP API: one anchor's listing, some details failing."""
+    """A stand-in for the KAP API: a range of two listing pages of four
+    disclosures each (three of them targets), some details failing."""
 
-    def __init__(self, failing=()):
+    def __init__(self, failing=(), first=None):
         self.failing, self.calls = set(failing), []
+        self.first = kap.KAP_FRAME_FIRST_INDEX if first is None else first
 
     def __call__(self, path, params=None, **_):
         self.calls.append(path)
@@ -73,6 +77,8 @@ class _Gateway:
                     {"id": "2", "title": "Fon", "stockCode": "FFF", "memberType": "FK"}]
         if path == "/disclosures":
             start = int(params["disclosureIndex"])
+            if start >= self.first + 8:                    # past the end of the range
+                return []
             return [{"disclosureIndex": str(start + k), "disclosureType": "ODA",
                      "disclosureClass": "ODA", "companyId": "1" if k < 3 else "2",
                      "title": "A"} for k in range(4)]
@@ -88,12 +94,9 @@ class _Gateway:
 
 
 @pytest.fixture
-def one_anchor(monkeypatch, tmp_path):
-    monkeypatch.setattr(kap, "KAP_FRAME_BLOCKS", 2)
-    monkeypatch.setattr(kap, "KAP_FRAME_STRIDE", 1)
-    path = str(tmp_path / "k.db")
-    first = kap.frame_blocks()[0]["block_start"]
-    return path, first
+def census(monkeypatch, tmp_path):
+    monkeypatch.setattr(kap, "KAP_LISTING_PAGE", 4)        # a full page is four items here
+    return str(tmp_path / "k.db"), kap.KAP_FRAME_FIRST_INDEX
 
 
 def _frame(path):
@@ -101,15 +104,19 @@ def _frame(path):
         return {r["block_seq"]: dict(r) for r in con.execute("SELECT * FROM sr_kap_frame")}
 
 
-def test_an_anchor_with_an_unavailable_detail_is_not_complete(monkeypatch, one_anchor):
-    path, first = one_anchor
+def _clock(monkeypatch, day):
+    monkeypatch.setattr(store, "now_iso", lambda: f"{day}T10:00:00+00:00")
+
+
+def test_a_page_with_an_unavailable_detail_is_not_complete(monkeypatch, census):
+    path, first = census
     gateway = _Gateway(failing={first + 1})
     monkeypatch.setattr(kap, "api_get", gateway)
     kap.run(path, max_blocks=1)
 
     block = _frame(path)[0]
     assert block["targets"] == 3                          # the fund filing is not a target
-    assert block["status"] == "incomplete_details"        # was 'complete' before the fix
+    assert block["status"] == "incomplete_details"
     with store.connect(path) as con:
         stored = [r[0] for r in con.execute("SELECT disclosure_index FROM sr_raw_kap_detail")]
         failures = [dict(r) for r in con.execute("SELECT * FROM sr_kap_detail_failures")]
@@ -119,86 +126,187 @@ def test_an_anchor_with_an_unavailable_detail_is_not_complete(monkeypatch, one_a
     progress = kap.progress(path)
     assert progress["details_stored"] == 2 and progress["details_unavailable"] == 1
     assert progress["blocks_complete"] == 0 and progress["blocks_attempted"] == 1
-    assert not progress["details_complete"]
+    assert not progress["listing_complete"] and not progress["details_complete"]
     assert kap.unavailable_details(path) == [first + 1]
 
 
-def test_ingestion_complete_and_details_complete_are_reported_separately(monkeypatch, one_anchor):
-    path, first = one_anchor
+def test_the_census_walks_the_range_page_by_page_to_its_end(monkeypatch, census):
+    path, first = census
+    gateway = _Gateway()
+    monkeypatch.setattr(kap, "api_get", gateway)
+    kap.run(path)
+    frame = _frame(path)
+    # Each page starts where the one before it ended; the empty page ends it.
+    assert [frame[k]["block_start"] for k in sorted(frame)] == [first, first + 4, first + 8]
+    assert kap.last_page(path) == 2
+    progress = kap.progress(path)
+    assert progress["kind"] == "census" and progress["listing_complete"]
+    assert progress["ingestion_complete"] and progress["details_complete"]
+    assert progress["frame_complete"] and progress["targets"] == 6
+    assert progress["range_listed_share"] == 1.0 and progress["blocks_total"] == 3
+    assert kap.verify_details(path)["verified"]
+
+
+def test_ingestion_complete_and_details_complete_are_reported_separately(monkeypatch, census):
+    path, first = census
     monkeypatch.setattr(kap, "api_get", _Gateway(failing={first + 1}))
-    kap.run(path)                                          # both anchors, one gap
+    kap.run(path)                                          # the whole range, one gap
     progress = kap.progress(path)
     assert progress["ingestion_complete"] and not progress["details_complete"]
     assert progress["details_unavailable"] == 1 and progress["targets"] == 6
     assert progress["unavailable_share"] == pytest.approx(1 / 6)
+    assert progress["details_awaiting_another_attempt"] == 1
     assert not progress["within_tolerance"] and not progress["frame_complete"]
 
 
-def test_a_later_run_fills_the_gap_and_gives_up_after_three_attempts(monkeypatch, one_anchor):
-    path, first = one_anchor
+def test_a_refused_detail_is_asked_for_once_a_day_and_three_times_in_all(monkeypatch, census):
+    path, first = census
     failing = _Gateway(failing={first + 1})
     monkeypatch.setattr(kap, "api_get", failing)
-    for _ in range(5):                                     # 1 + retries, capped
-        kap.run(path, max_blocks=1)
-    attempts = [c for c in failing.calls if c.endswith(f"/{first + 1}")]
-    assert len(attempts) == kap.MAX_DETAIL_ATTEMPTS == 3
-    assert _frame(path)[0]["status"] == "incomplete_details"
+    attempts = lambda: len([c for c in failing.calls if c.endswith(f"/{first + 1}")])   # noqa: E731
 
-    # A different database where the gateway recovers before the cap.
-    path2 = path.replace("k.db", "k2.db")
+    _clock(monkeypatch, "2026-11-01")
+    kap.run(path)
+    kap.run(path)                                          # same day: not asked again
+    assert attempts() == 1
+    for day in ("2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"):
+        _clock(monkeypatch, day)
+        kap.run(path)
+    assert attempts() == kap.MAX_DETAIL_ATTEMPTS == 3      # capped
+    progress = kap.progress(path)
+    # Refused on three separate days: it may now be accepted as unavailable,
+    # but one in six is far above the registered share.
+    assert progress["details_awaiting_another_attempt"] == 0
+    assert progress["details_unavailable"] == 1 and not progress["within_tolerance"]
+    monkeypatch.setattr(kap, "KAP_MAX_UNAVAILABLE_SHARE", 0.2)
+    assert kap.progress(path)["within_tolerance"] and kap.progress(path)["frame_complete"]
+
+
+def test_a_later_run_fills_the_gap(monkeypatch, census):
+    path, first = census
+    _clock(monkeypatch, "2026-11-01")
     monkeypatch.setattr(kap, "api_get", _Gateway(failing={first + 1}))
-    kap.run(path2, max_blocks=1)
-    monkeypatch.setattr(kap, "api_get", _Gateway())
-    kap.run(path2)                                         # finishes anchor 1, then retries
-    assert _frame(path2)[0]["status"] == "complete"
-    assert kap.progress(path2)["details_unavailable"] == 0
-
-
-def test_a_placeholder_row_from_the_old_ingester_counts_as_unavailable(monkeypatch, one_anchor):
-    """Before the fix a failed detail was stored as a row with no timestamp and
-    the anchor was marked complete. Such rows may exist; they are gaps."""
-
-    path, first = one_anchor
+    kap.run(path)
+    _clock(monkeypatch, "2026-11-02")
     monkeypatch.setattr(kap, "api_get", _Gateway())
     kap.run(path)
-    assert kap.progress(path)["details_complete"]
-    kap.ensure_frame(path)
-    with store.connect(path) as con:                       # an extra target, served as a stub
-        con.execute("UPDATE sr_kap_frame SET targets = targets + 1 WHERE block_seq = 0")
+    assert _frame(path)[0]["status"] == "complete"
+    assert kap.progress(path)["details_unavailable"] == 0
+    assert kap.progress(path)["frame_complete"]
+
+
+def test_rows_of_an_earlier_frame_are_reused_and_left_as_they_were(monkeypatch, census):
+    """A disclosure the anchor sample already holds is a member of the census.
+    Its listing row and its detail are not fetched again and not rewritten."""
+
+    path, first = census
+    store.init_db(path)
+    old = kap.detail_row({"disclosureIndex": str(first + 1), "senderId": "1",
+                          "subject": {"tr": "Eski"}, "time": "02.01.2023 09:00:00"}, b"old")
+    with store.connect(path) as con:
         con.execute("INSERT INTO sr_raw_kap_listing VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (first + 40, kap.KAP_FRAME_VERSION, 0, "ODA", "ODA", "1", "A",
-                     json.dumps({"disclosureIndex": str(first + 40), "disclosureClass": "ODA",
-                                 "companyId": "1"}), "t", "now"))
-        row = kap.detail_row({"disclosureIndex": str(first + 40), "unavailable": "404"}, b"x")
+                    (first + 1, "kap-anchor-sample-v2", 7, "ODA", "ODA", "1", "A", "{}", "t",
+                     "2026-10-11T00:00:00+00:00"))
+        con.execute(
+            "INSERT INTO sr_raw_kap_detail VALUES (:disclosure_index,:sender_id,:sender_title,"
+            ":sender_codes,:related_stocks,:disclosure_type,:disclosure_class,:disclosure_reason,"
+            ":subject_tr,:subject_en,:summary_tr,:published_raw,:event_type_code,:body_text,"
+            ":metadata_json,:payload_sha256,:source,:retrieved_at)", old)
+    gateway = _Gateway()
+    monkeypatch.setattr(kap, "api_get", gateway)
+    kap.run(path)
+
+    assert f"/disclosureDetail/{first + 1}" not in gateway.calls       # not fetched again
+    with store.connect(path) as con:
+        listing = dict(con.execute("SELECT * FROM sr_raw_kap_listing WHERE disclosure_index=?",
+                                   (first + 1,)).fetchone())
+        detail = dict(con.execute("SELECT * FROM sr_raw_kap_detail WHERE disclosure_index=?",
+                                  (first + 1,)).fetchone())
+        member = dict(con.execute("SELECT * FROM sr_kap_frame_items WHERE disclosure_index=?",
+                                  (first + 1,)).fetchone())
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute("DELETE FROM sr_kap_frame_items")
+    assert (listing["frame_version"], listing["block_seq"]) == ("kap-anchor-sample-v2", 7)
+    assert detail["subject_tr"] == "Eski" and detail["payload_sha256"] == old["payload_sha256"]
+    assert (member["frame_version"], member["block_seq"], member["is_target"]) == (
+        kap.KAP_FRAME_VERSION, 0, 1)
+    progress = kap.progress(path)
+    assert progress["targets"] == 6 and progress["details_complete"]
+    assert progress["targets_reused_from_earlier_frames"] == 1
+
+
+def test_a_placeholder_row_from_the_old_ingester_counts_as_unavailable(monkeypatch, census):
+    """Before the hardening a failed detail was stored as a row with no
+    timestamp. Such rows may exist; they are gaps."""
+
+    path, first = census
+    store.init_db(path)
+    row = kap.detail_row({"disclosureIndex": str(first + 2), "unavailable": "404"}, b"x")
+    with store.connect(path) as con:
         con.execute(
             "INSERT INTO sr_raw_kap_detail VALUES (:disclosure_index,:sender_id,:sender_title,"
             ":sender_codes,:related_stocks,:disclosure_type,:disclosure_class,:disclosure_reason,"
             ":subject_tr,:subject_en,:summary_tr,:published_raw,:event_type_code,:body_text,"
             ":metadata_json,:payload_sha256,:source,:retrieved_at)", row)
+    monkeypatch.setattr(kap, "api_get", _Gateway())
+    kap.run(path)
     progress = kap.progress(path)
     assert progress["details_unavailable"] == 1 and not progress["details_complete"]
-    assert kap.unavailable_details(path) == [first + 40]
+    assert kap.unavailable_details(path) == [first + 2]
 
 
-def test_real_run_tolerates_a_small_recorded_gap_and_refuses_a_large_one(tmp_path):
-    small = _database(str(tmp_path / "small.db"))
-    with store.connect(small) as con:                      # 300 stored of 302 targets
-        con.execute("UPDATE sr_kap_frame SET targets = 0")
-        con.execute("UPDATE sr_kap_frame SET targets = 302 WHERE block_seq = 0")
-    registry.register(small)
-    outcome = pipeline.run_real(small, index_db=tmp_path / "none.db")
-    sample = outcome["manifest"]["kap_sample"]
-    assert (sample["targets"], sample["details_stored"], sample["details_unavailable"]) == (302, 300, 2)
-    assert sample["unavailable_share"] == pytest.approx(2 / 302)
-    assert outcome["manifest"]["frame_complete"]
+def test_a_stored_detail_that_cannot_be_dated_fails_verification(monkeypatch, census):
+    path, first = census
 
-    large = _database(str(tmp_path / "large.db"))
-    with store.connect(large) as con:                      # 300 stored of 310: over 1%
-        con.execute("UPDATE sr_kap_frame SET targets = 0")
-        con.execute("UPDATE sr_kap_frame SET targets = 310 WHERE block_seq = 0")
-    registry.register(large)
+    class Undated(_Gateway):
+        def __call__(self, path, params=None, **kw):
+            out = super().__call__(path, params, **kw)
+            if path.endswith(f"/{first + 2}"):
+                out["time"] = "yesterday"
+            return out
+
+    monkeypatch.setattr(kap, "api_get", Undated())
+    kap.run(path)
+    check = kap.verify_details(path)
+    assert not check["verified"] and check["timestamp_unparseable"] == [first + 2]
+
+
+def _gap(path, index, days=()):
+    """One more target with no detail, refused on the given days."""
+
+    with store.connect(path) as con:
+        con.execute("INSERT INTO sr_kap_frame_items VALUES (?,?,?,?,?)",
+                    (kap.KAP_FRAME_VERSION, index, 0, 1, "now"))
+        for day in days:
+            con.execute(
+                "INSERT INTO sr_kap_detail_failures (disclosure_index, frame_version, block_seq, "
+                "http_status, error, source, attempted_at) VALUES (?,?,?,?,?,?,?)",
+                (index, kap.KAP_FRAME_VERSION, 0, 404, "x", "t", f"{day}T10:00:00+00:00"))
+
+
+def test_real_run_needs_complete_retrieval_or_three_refusals_within_the_share(tmp_path, monkeypatch):
+    # One refusal so far: the run waits for the other attempts.
+    waiting = _database(str(tmp_path / "waiting.db"))
+    _gap(waiting, 9_000_001, days=("2026-11-01",))
+    registry.register(waiting)
     with pytest.raises(pipeline.NotReady, match="unavailable"):
-        pipeline.run_real(large, index_db=tmp_path / "none.db")
+        pipeline.run_real(waiting, index_db=tmp_path / "none.db")
+
+    # Three refusals on three days, but one in 361 is above the registered 0.1%.
+    refused = _database(str(tmp_path / "refused.db"))
+    _gap(refused, 9_000_001, days=("2026-11-01", "2026-11-02", "2026-11-03"))
+    registry.register(refused)
+    with pytest.raises(pipeline.NotReady, match="unavailable"):
+        pipeline.run_real(refused, index_db=tmp_path / "none.db")
+    assert kap.progress(refused)["details_awaiting_another_attempt"] == 0
+
+    # Within the share (raised here), the run proceeds and names the gap.
+    monkeypatch.setattr(kap, "KAP_MAX_UNAVAILABLE_SHARE", 0.01)
+    outcome = pipeline.run_real(refused, index_db=tmp_path / "none.db")
+    sample = outcome["manifest"]["kap_sample"]
+    assert (sample["targets"], sample["details_stored"], sample["details_unavailable"]) == (361, 360, 1)
+    assert sample["unavailable_indices"] == [9_000_001]
+    assert outcome["manifest"]["frame_complete"]
 
 
 # -- Provenance -----------------------------------------------------------------
@@ -211,15 +319,18 @@ def test_manifest_fingerprints_the_data_it_was_computed_from(tmp_path):
         assert len(one[key]) == 64 and one[key] == two[key]
     assert one["kap_sample_digest"] != three["kap_sample_digest"]
     assert one["price_snapshot_digest"] != three["price_snapshot_digest"]
-    assert one["counts"]["price_bars"] > 0 and one["counts"]["kap_details"] == 300
+    assert one["counts"]["price_bars"] > 0 and one["counts"]["kap_details"] == 360
+    assert one["counts"]["second_source_bars"] > 0
+    assert len(one["second_source_price_digest"]) == 64
+    assert one["second_source_price_digest"] != three["second_source_price_digest"]
 
     registry.register(first)
     manifest = pipeline.run_real(first, index_db=tmp_path / "none.db")["manifest"]
     assert manifest["provenance"]["kap_sample_digest"] == one["kap_sample_digest"]
 
 
-def test_each_ingestion_run_is_logged_with_the_ingesters_own_hash(monkeypatch, one_anchor):
-    path, _ = one_anchor
+def test_each_ingestion_run_is_logged_with_the_ingesters_own_hash(monkeypatch, census):
+    path, _ = census
     monkeypatch.setattr(kap, "api_get", _Gateway())
     kap.run(path)
     with store.connect(path) as con:

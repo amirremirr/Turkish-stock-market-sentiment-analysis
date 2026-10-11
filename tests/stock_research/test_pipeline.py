@@ -15,7 +15,8 @@ import pytest
 
 from stock_research import fixtures, pipeline, reporting, store
 from stock_research.config import BENCHMARK_TICKER, KAP_FRAME_VERSION
-from stock_research.data import kap, prices
+from stock_research.calendar import EXCHANGE_SCHEDULE
+from stock_research.data import kap, prices, secondary
 from stock_research.hypotheses import registry
 from stock_research.hypotheses.common import DATA_INSUFFICIENT
 
@@ -23,6 +24,7 @@ FORMS = [
     ("Yeni İş İlişkisi", "Yeni sözleşme imzalanması", 0.03),
     ("Kar Payı Dağıtım İşlemlerine İlişkin Bildirim", "Kar payı", -0.02),
     ("Genel Kurul İşlemlerine İlişkin Bildirim", "Genel kurul", 0.0),
+    ("Genel Kurul Bildirimi", "Genel kurul toplantısı", 0.0),
     ("Özel Durum Açıklaması (Genel)", "Pay geri alım işlemleri hakkında", 0.0),
     ("Özel Durum Açıklaması (Genel)", "Bilgilendirme", 0.0),
 ]
@@ -30,9 +32,12 @@ FLAGS = ("oda_UpdateAnnouncementFlag| Yapılan Açıklama Güncelleme mi? Hayır
          "oda_CorrectionAnnouncementFlag| Yapılan Açıklama Düzeltme mi? Hayır (No)")
 
 
-def _database(path, *, complete=True, per_form=60, seed=3):
+def _database(path, *, complete=True, per_form=60, seed=3, second_source=True):
     rng = np.random.default_rng(seed)
-    days = fixtures.weekdays("2022-06-01", 440)
+    # The sessions of a real 2023: the gate compares them with the schedule.
+    closed = EXCHANGE_SCHEDULE["2023"]
+    days = fixtures.weekdays("2022-06-01", 440, skip=(
+        *closed["holidays"], *closed["cancelled_sessions"], *closed["unscheduled_closures"]))
     codes = [f"TK{n:03d}" for n in range(40)]
     effects, details, taken = {}, [], set()
     index = 2_000_000
@@ -72,6 +77,8 @@ def _database(path, *, complete=True, per_form=60, seed=3):
             con.execute("INSERT INTO sr_raw_kap_listing VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (number, KAP_FRAME_VERSION, 0, "ODA", "ODA", detail["senderId"],
                          detail["senderTitle"], "{}", "t", "now"))
+            con.execute("INSERT INTO sr_kap_frame_items VALUES (?,?,?,?,?)",
+                        (KAP_FRAME_VERSION, number, 0, 1, "now"))
             row = kap.detail_row(detail, b"raw")
             row["body_text"] = detail["_body"]
             con.execute(
@@ -81,9 +88,11 @@ def _database(path, *, complete=True, per_form=60, seed=3):
                 ":metadata_json,:payload_sha256,:source,:retrieved_at)", row)
         con.execute("UPDATE sr_kap_frame SET status = ?",
                     ("complete" if complete else "listed",))
-        if not complete:
-            con.execute("UPDATE sr_kap_frame SET status='complete' WHERE block_seq < 10")
+        if complete:                                    # the listing reached the end
+            con.execute("INSERT OR REPLACE INTO sr_meta VALUES (?, '0')", (kap._END_KEY,))
     pipeline.ingest_prices(path, provider=provider)
+    if second_source:
+        pipeline.ingest_secondary_prices(path, provider=secondary.from_primary(frames))
     return path
 
 
@@ -105,10 +114,14 @@ def test_real_run_refuses_before_registration_and_on_a_partial_frame(tmp_path, d
 def test_describe_reports_counts_without_any_return(database, tmp_path):
     ctx, meta = pipeline.real_context(database, index_db=tmp_path / "none.db")
     summary = pipeline.describe(ctx, meta)
-    assert summary["kap_events"] == 300 and summary["ticker_resolved"] == 300
+    assert summary["kap_events"] == 360 and summary["ticker_resolved"] == 360
     assert summary["by_category"] == {
-        "new_contract": 60, "dividend": 60, "administrative": 60, "buyback": 60, "general_other": 60}
-    assert summary["by_bucket"] == {"post_close": 300}
+        "administrative": 120, "new_contract": 60, "dividend": 60, "buyback": 60,
+        "general_other": 60}
+    assert summary["calendar_schedule_mismatches"] == []
+    assert summary["price_reconciliation"]["returns_set_missing_for_disagreement"] == 0
+    assert not summary["gates"]["protocol_registered"]["passed"]
+    assert summary["by_bucket"] == {"post_close": 360}
     text = json.dumps(summary, default=str)
     assert "car_" not in text and "mar_" not in text
     assert not summary["availability"]["news_events"]["available"]
@@ -121,11 +134,14 @@ def test_registered_run_goes_end_to_end_and_is_stored_once(database, tmp_path):
     results, manifest = outcome["results"], outcome["manifest"]
 
     assert manifest["protocol_hash"] == registry.protocol_hash()
-    assert manifest["frame_complete"] and manifest["sample"]["kap_events"] == 300
+    assert manifest["frame_complete"] and manifest["sample"]["kap_events"] == 360
+    assert all(gate["passed"] for gate in manifest["gates"].values())
+    assert set(manifest["environment"]) >= {"python", "numpy", "pandas", "scipy"}
     h7 = results["H7"]
     assert h7["status"] == "supported" and h7["primary"]["joint_test"]
-    assert (h7["primary"]["highest_category"], h7["primary"]["lowest_category"]) == (
-        "new_contract", "dividend")
+    contrast = {row["class"]: row["contrast"] for row in h7["primary"]["contrasts"]}
+    assert contrast["new_contract"] > 0.015 and contrast["dividend"] < -0.008
+    assert "new_contract" in h7["primary"]["significant_classes"]
     assert h7["primary"]["p_holm"] == pytest.approx(min(1.0, 9 * h7["primary"]["p"]))
     # No insider forms in this sample, and no news: everything else says why.
     for key in ("H1", "H2", "H3", "H4", "H5", "H6", "H8", "H9"):
