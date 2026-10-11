@@ -1,0 +1,78 @@
+{
+ "backup": "C:\\Users\\RasaComputer\\Desktop\\finance-db-backups\\stock_research_pre_v3_census_20261011T183952Z.db",
+ "bytes": 38649856,
+ "sha256": "c11495bc41434380908918679f0745b9a90c0612bd0c3dc79504ad2b819d42d0",
+ "taken_utc": "20261011T183952Z",
+ "integrity_check_backup": "ok",
+ "integrity_check_source": "ok",
+ "foreign_key_check_backup": 0,
+ "every_table_identical_to_source": true,
+ "tables": {
+  "sr_ingest_log": {
+   "rows": 5,
+   "content_digest": "44f8146c680e2756"
+  },
+  "sr_kap_detail_failures": {
+   "rows": 0,
+   "content_digest": "e3b0c44298fc1c14"
+  },
+  "sr_kap_frame": {
+   "rows": 80,
+   "content_digest": "c8130c9fc2f9f458"
+  },
+  "sr_manifests": {
+   "rows": 0,
+   "content_digest": "e3b0c44298fc1c14"
+  },
+  "sr_meta": {
+   "rows": 1,
+   "content_digest": "9783ccdd849a28aa"
+  },
+  "sr_price_availability": {
+   "rows": 237,
+   "content_digest": "daa85f612cc8546d"
+  },
+  "sr_protocols": {
+   "rows": 3,
+   "content_digest": "fe8c206d974d12a9"
+  },
+  "sr_raw_kap_detail": {
+   "rows": 3414,
+   "content_digest": "42187846b0a22540"
+  },
+  "sr_raw_kap_listing": {
+   "rows": 4000,
+   "content_digest": "f648c29467f2b0e8"
+  },
+  "sr_raw_members": {
+   "rows": 1014,
+   "content_digest": "0514e55b2720312e"
+  },
+  "sr_raw_price_bars": {
+   "rows": 76660,
+   "content_digest": "fc562836fbe2f44b"
+  },
+  "sr_results": {
+   "rows": 0,
+   "content_digest": "e3b0c44298fc1c14"
+  }
+ },
+ "triggers": 18,
+ "protocols": [
+  [
+   "stock-research-protocol-v1",
+   "b8a5c8fba4881ada78574a6346be1ab0bb0c14aae064f95ecddbcdd5e2187735",
+   "2026-10-11T00:09:09+00:00"
+  ],
+  [
+   "stock-research-protocol-v1",
+   "92366aa0a6342e9c78c02700a7253b45e5dc4ce0cac6476467057164cb66dfb8",
+   "2026-10-11T00:15:04+00:00"
+  ],
+  [
+   "stock-research-protocol-v2",
+   "09e9382e77ec44bc06aaaf5c4bde0d64e06a6584d2aeb4b65ed35da0b2e7d99a",
+   "2026-10-11T08:39:14+00:00"
+  ]
+ ]
+}
