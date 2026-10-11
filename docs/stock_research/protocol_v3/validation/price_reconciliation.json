@@ -1,0 +1,225 @@
+{
+ "copy_of_database_with_anchors_complete": 29,
+ "second_source_fetch": {
+  "snapshot_id": "isyatirim-2022-06-01-2024-03-01",
+  "symbols": 477,
+  "ok": 356,
+  "no_data": 120,
+  "error": 1,
+  "skipped": 0
+ },
+ "price_coverage": {
+  "codes_in_sample": 477,
+  "primary": {
+   "snapshot_id": "yahoo-2022-06-01-2024-03-01",
+   "asked": 477,
+   "never_asked": 0,
+   "never_asked_examples": [],
+   "served": 346,
+   "not_served": 131
+  },
+  "secondary": {
+   "snapshot_id": "isyatirim-2022-06-01-2024-03-01",
+   "asked": 477,
+   "never_asked": 0,
+   "never_asked_examples": [],
+   "served": 356,
+   "not_served": 121
+  }
+ },
+ "tolerance": 0.01,
+ "returns_compared": 143654,
+ "absolute_difference_quantiles": {
+  "0.5": 1.1796082205473013e-06,
+  "0.9": 2.4419307592671302e-05,
+  "0.975": 0.00221359586868608,
+  "0.99": 0.011684466923194874,
+  "0.999": 0.05105535292401992
+ },
+ "share_differing_by_more_than": {
+  "0.002": 0.025513909060440175,
+  "0.005": 0.018231203217517596,
+  "0.010": 0.01124874315718914,
+  "0.020": 0.006319126354597251
+ },
+ "disagreements_over_tolerance": 1611,
+ "dates_with_ten_or_more_disagreements": {
+  "2022-06-27": "108 of 293",
+  "2022-06-28": "99 of 286",
+  "2022-11-09": "56 of 315",
+  "2022-11-10": "53 of 308",
+  "2022-11-17": "55 of 315",
+  "2022-11-18": "61 of 313",
+  "2022-11-29": "57 of 315",
+  "2022-11-30": "55 of 313",
+  "2022-12-08": "35 of 316",
+  "2022-12-09": "32 of 314",
+  "2022-12-12": "62 of 317",
+  "2022-12-13": "60 of 317",
+  "2022-12-16": "158 of 318",
+  "2022-12-19": "146 of 303",
+  "2023-01-05": "283 of 323",
+  "2023-01-06": "283 of 322"
+ },
+ "disagreements_on_those_dates": 1603,
+ "disagreements_elsewhere": 8,
+ "disagreements_in_2023": 572,
+ "benchmark_disagreements": 0,
+ "reconciliation_summary": {
+  "tolerance": 0.01,
+  "returns_verified": 142043,
+  "returns_set_missing_for_disagreement": 1611,
+  "returns_set_missing_for_no_second_source": 653,
+  "returns_set_missing_on_action_dates": 6,
+  "tickers_without_second_source": 2,
+  "benchmark_has_second_source": true
+ },
+ "tickers_without_second_source": [
+  "CVKMD.IS",
+  "LRSHO.IS"
+ ],
+ "returns_kept_under_v2_rules": 144307,
+ "returns_kept_under_v3_rules": 142043,
+ "corporate_action_consistency": {
+  "actions_listed_by_second_provider": 463,
+  "actions_only_the_first_provider_records": 0,
+  "capital_increases": {
+   "listed": 103,
+   "recorded_by_first_provider": 72,
+   "return_by_state": {
+    "verified": 90,
+    "adjusted_move_beyond_price_limit": 5,
+    "source_disagreement": 4,
+    "no_return": 3,
+    "no_second_source": 1
+   }
+  },
+  "cash_dividends": {
+   "listed": 253,
+   "recorded_by_first_provider": 252,
+   "return_by_state": {
+    "verified": 242,
+    "source_disagreement": 7,
+    "no_return": 4
+   }
+  }
+ },
+ "capital_increases_whose_return_is_not_verified": [
+  {
+   "ticker": "DMSAS.IS",
+   "date": "2022-06-21",
+   "kind": "bonus_issue",
+   "return": "adjusted_move_beyond_price_limit"
+  },
+  {
+   "ticker": "EGSER.IS",
+   "date": "2023-05-04",
+   "kind": "rights_and_bonus",
+   "return": "adjusted_move_beyond_price_limit"
+  },
+  {
+   "ticker": "GEDIK.IS",
+   "date": "2022-12-14",
+   "kind": "rights_issue",
+   "return": "source_disagreement"
+  },
+  {
+   "ticker": "HEDEF.IS",
+   "date": "2022-08-03",
+   "kind": "bonus_issue",
+   "return": "source_disagreement"
+  },
+  {
+   "ticker": "HEKTS.IS",
+   "date": "2022-10-12",
+   "kind": "rights_and_bonus",
+   "return": "adjusted_move_beyond_price_limit"
+  },
+  {
+   "ticker": "ISATR.IS",
+   "date": "2022-06-14",
+   "kind": "bonus_issue",
+   "return": "no_return"
+  },
+  {
+   "ticker": "ISATR.IS",
+   "date": "2024-02-27",
+   "kind": "bonus_issue",
+   "return": "no_return"
+  },
+  {
+   "ticker": "ISBTR.IS",
+   "date": "2022-06-14",
+   "kind": "bonus_issue",
+   "return": "no_return"
+  },
+  {
+   "ticker": "LRSHO.IS",
+   "date": "2024-01-24",
+   "kind": "rights_issue",
+   "return": "no_second_source"
+  },
+  {
+   "ticker": "MAGEN.IS",
+   "date": "2023-11-29",
+   "kind": "bonus_issue",
+   "return": "adjusted_move_beyond_price_limit"
+  },
+  {
+   "ticker": "NATEN.IS",
+   "date": "2023-11-29",
+   "kind": "bonus_issue",
+   "return": "adjusted_move_beyond_price_limit"
+  },
+  {
+   "ticker": "SASA.IS",
+   "date": "2023-05-23",
+   "kind": "bonus_issue",
+   "return": "source_disagreement"
+  },
+  {
+   "ticker": "VKGYO.IS",
+   "date": "2023-09-26",
+   "kind": "bonus_issue",
+   "return": "source_disagreement"
+  }
+ ],
+ "action_date_limit_flags": [
+  [
+   "DMSAS.IS",
+   "2022-06-21"
+  ],
+  [
+   "EGSER.IS",
+   "2023-05-04"
+  ],
+  [
+   "HEKTS.IS",
+   "2022-10-12"
+  ],
+  [
+   "MAGEN.IS",
+   "2023-11-29"
+  ],
+  [
+   "NATEN.IS",
+   "2023-11-29"
+  ],
+  [
+   "SEYKM.IS",
+   "2022-09-22"
+  ]
+ ],
+ "calendar_schedule_mismatches": [],
+ "sampled_events": {
+  "eligible_thinned_with_data_under_v2_rules": 154,
+  "of_which_still_have_their_data_under_v3_rules": 153,
+  "lost_by_group": {
+   "asset_acquisition": 1
+  },
+  "lost_by_day0": {
+   "2023-01-02": 1
+  },
+  "sampled_disclosures_with_day0_on_a_mass_disagreement_date": 0
+ }
+}

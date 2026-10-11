@@ -1,5 +1,10 @@
 # Statistical protocol
 
+> **On this branch the code is the candidate protocol v3, which is not
+> registered.** This document describes v2 as registered. What v3 changes,
+> and the evidence for it, is in `protocol_v3/`. v2 was never run: the
+> readiness audit returned BLOCKED (`readiness/READINESS_DECISION.md`).
+
 The rules below were fixed before any real outcome was read. They are
 fingerprinted: `python -m stock_research.cli status` prints the protocol hash,
 which covers the nine specifications, every rule version and constant, and a

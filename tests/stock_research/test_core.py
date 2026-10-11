@@ -46,11 +46,12 @@ def test_day0_is_the_first_session_able_to_act(calendar_2023, stamp, day0, bucke
     assert not result.timing_ambiguous
 
 
-def test_afternoon_before_a_closure_is_delayed_and_flagged(calendar_2023):
-    # 14:00 on the eve of a holiday: an early close is possible but unrecorded.
+def test_afternoon_of_a_recorded_half_day_is_after_the_close(calendar_2023):
+    # 14:00 on 20 April 2023, a half day in the recorded schedule. Under v2
+    # the early close was inferred and the row flagged; in v3 it is known.
     eve = calendar_2023.actionable(_at("2023-04-20T14:00:00"))
     assert (eve.day0, eve.bucket, eve.timing_ambiguous) == (
-        "2023-04-24", BUCKET_POST_CLOSE, True)
+        "2023-04-24", BUCKET_POST_CLOSE, False)
     # Morning of the same day is unambiguous, and so is after the regular close.
     assert calendar_2023.actionable(_at("2023-04-20T11:00:00")).bucket == BUCKET_DURING
     late = calendar_2023.actionable(_at("2023-04-20T18:30:00"))
@@ -103,7 +104,7 @@ def test_a_missing_session_leaves_two_returns_missing_not_one_long_return():
     assert ret[days[4]] == pytest.approx(14 / 13 - 1)
 
 
-def test_unexplained_jump_is_flagged_and_removed_but_an_explained_one_is_kept():
+def test_a_jump_is_removed_with_or_without_a_recorded_action():
     days = fixtures.weekdays("2023-01-02", 5)
     market = _flat(days, [100, 100, 100, 100, 100])
     jumpy = _flat(days, [10, 10, 5, 5, 5])
@@ -113,7 +114,11 @@ def test_unexplained_jump_is_flagged_and_removed_but_an_explained_one_is_kept():
                                origin="synthetic", snapshot_id="t")
     assert np.isnan(panel.frame("J")["ret"][days[2]])
     assert {"date": days[2], "issue": "unexplained_jump"} in panel.issues["J"]
-    assert panel.frame("E")["ret"][days[2]] == pytest.approx(-0.5)
+    # v2 kept a jump on a date with a recorded action. An adjusted return is
+    # continuous across a split, so a 50% adjusted move there is a wrong
+    # factor, and v3 removes it under its own name.
+    assert np.isnan(panel.frame("E")["ret"][days[2]])
+    assert {"date": days[2], "issue": "adjusted_move_beyond_price_limit"} in panel.issues["E"]
     # Same-day quantities are withheld on the action date.
     assert np.isnan(panel.frame("E")["gap"][days[2]])
 

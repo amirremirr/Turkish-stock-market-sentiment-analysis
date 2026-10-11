@@ -1,0 +1,90 @@
+{
+ "v3_anchor80": {
+  "simulations": 300,
+  "bootstrap_draws": 999,
+  "design": {
+   "events": 322.17,
+   "dates": 53.17,
+   "issuers": 189.17,
+   "groups": 3.5,
+   "smallest_group": 35.17,
+   "fewest_dates_in_a_group": 23.0,
+   "fewest_issuers_in_a_group": 34.17,
+   "share_of_events_from_repeat_issuers": 0.59,
+   "largest_issuer": 10.67,
+   "tested": 2.5
+  },
+  "results": {
+   "null@0.0": {
+    "verdict": {
+     "valid": 300,
+     "joint_holm": {
+      "rate": 0.0033333333333333335,
+      "ci": [
+       0.0,
+       0.009855768688548667
+      ]
+     },
+     "supported": {
+      "rate": 0.0033333333333333335,
+      "ci": [
+       0.0,
+       0.009855768688548667
+      ]
+     },
+     "any_contrast_significant": {
+      "rate": 0.04,
+      "ci": [
+       0.01782513134198987,
+       0.06217486865801013
+      ]
+     }
+    }
+   }
+  }
+ },
+ "v3_census_programmes": {
+  "simulations": 600,
+  "bootstrap_draws": 999,
+  "design": {
+   "events": 897.0,
+   "dates": 174.83,
+   "issuers": 625.0,
+   "groups": 7.5,
+   "smallest_group": 55.17,
+   "fewest_dates_in_a_group": 41.67,
+   "fewest_issuers_in_a_group": 38.83,
+   "share_of_events_from_repeat_issuers": 0.39,
+   "largest_issuer": 22.83,
+   "tested": 6.5
+  },
+  "results": {
+   "null@0.0": {
+    "verdict": {
+     "valid": 600,
+     "joint_holm": {
+      "rate": 0.006666666666666667,
+      "ci": [
+       0.00015514752890154193,
+       0.013178185804431792
+      ]
+     },
+     "supported": {
+      "rate": 0.005,
+      "ci": [
+       0.0,
+       0.010643869830769193
+      ]
+     },
+     "any_contrast_significant": {
+      "rate": 0.043333333333333335,
+      "ci": [
+       0.02704143032282828,
+       0.059625236343838386
+      ]
+     }
+    }
+   }
+  }
+ }
+}
