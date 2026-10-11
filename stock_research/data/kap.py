@@ -58,8 +58,9 @@ from stock_research.calendar import parse_kap_time
 from stock_research.config import (
     KAP_EARLIER_FRAMES, KAP_FRAME_FIRST_INDEX, KAP_FRAME_LAST_INDEX, KAP_FRAME_VERSION,
     KAP_LISTED_MEMBER_MARK, KAP_LISTING_PAGE, KAP_LISTING_TYPES, KAP_MAX_DETAIL_ATTEMPTS,
-    KAP_MAX_UNAVAILABLE_SHARE, KAP_MIN_ATTEMPT_DAYS, KAP_TARGET_CLASSES,
-    KAP_THROTTLE_SECONDS, REPOSITORY_ROOT,
+    KAP_MAX_UNAVAILABLE_SHARE, KAP_MIN_ATTEMPT_DAYS, KAP_RATE_LIMIT_WAIT_SECONDS,
+    KAP_TARGET_CLASSES, KAP_THROTTLE_MAX_SECONDS, KAP_THROTTLE_RECOVERY_CALLS,
+    KAP_THROTTLE_SECONDS, KAP_THROTTLE_STEP_SECONDS, REPOSITORY_ROOT,
 )
 
 logger = logging.getLogger("stock_research.kap")
@@ -86,11 +87,54 @@ def _auth():
     return key, secret
 
 
+class Pace:
+    """Seconds to leave between calls, adjusted to what the gateway allows.
+
+    A refused call (HTTP 429) costs far more than a slightly wider spacing,
+    so each refusal widens the spacing by a step, up to a ceiling, and a run
+    of accepted calls narrows it by a second, down to the plan's own spacing.
+    """
+
+    def __init__(self) -> None:
+        self.spacing = float(KAP_THROTTLE_SECONDS)
+        self.accepted_in_a_row = 0
+        self.refusals = 0
+
+    def accepted(self) -> float:
+        self.accepted_in_a_row += 1
+        if self.accepted_in_a_row >= KAP_THROTTLE_RECOVERY_CALLS:
+            self.accepted_in_a_row = 0
+            self.spacing = max(float(KAP_THROTTLE_SECONDS), self.spacing - 1.0)
+        return self.spacing
+
+    def refused(self, retry_after: Optional[str] = None) -> float:
+        """Seconds to wait before asking again."""
+
+        self.refusals += 1
+        self.accepted_in_a_row = 0
+        self.spacing = min(float(KAP_THROTTLE_MAX_SECONDS),
+                           self.spacing + KAP_THROTTLE_STEP_SECONDS)
+        try:
+            named = float(retry_after) if retry_after is not None else None
+        except (TypeError, ValueError):
+            named = None
+        if named is None or not (0 < named <= 600):
+            return float(KAP_RATE_LIMIT_WAIT_SECONDS)
+        return max(named, self.spacing)
+
+
+PACE = Pace()
+
+
 def api_get(path: str, params: Optional[dict] = None, *, attempts: int = 5) -> Any:
-    """GET with the plan's throttle. Sleeps after every call, success or not."""
+    """GET at the pace the gateway allows. Sleeps after every call, accepted
+    or not. A rate-limit refusal does not use up an attempt: it is the
+    gateway asking for patience, not a failure of the request."""
 
     last_error = None
-    for _ in range(attempts):
+    tries = refusals = 0
+    while tries < attempts:
+        tries += 1
         try:
             response = requests.get(_base_url() + path, params=params,
                                     auth=_auth(), timeout=90)
@@ -100,9 +144,14 @@ def api_get(path: str, params: Optional[dict] = None, *, attempts: int = 5) -> A
             continue
         if response.status_code == 429:
             last_error = "429"
-            time.sleep(65)
+            refusals += 1
+            wait = PACE.refused(response.headers.get("Retry-After"))
+            logger.info("rate limited: waiting %.0f s, spacing now %.0f s", wait, PACE.spacing)
+            time.sleep(wait)
+            if refusals <= 20:
+                tries -= 1
             continue
-        time.sleep(KAP_THROTTLE_SECONDS)
+        time.sleep(PACE.accepted())
         if response.status_code >= 500:
             last_error = f"HTTP {response.status_code}"
             time.sleep(30)

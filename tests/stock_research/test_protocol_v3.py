@@ -550,3 +550,59 @@ def test_every_rule_constant_of_v3_moves_the_hash(monkeypatch):
         monkeypatch.setattr(config, name, value)
         assert registry.protocol_hash() != before, name
         monkeypatch.undo()
+
+
+# -- Pacing: how fast the census arrives, never what is in it ----------------------
+class _Reply:
+    def __init__(self, status, retry_after=None):
+        self.status_code, self.headers = status, ({} if retry_after is None
+                                                  else {"Retry-After": retry_after})
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"ok": True}
+
+
+def _paced(monkeypatch, replies):
+    from stock_research.data import kap
+
+    waits, queue = [], list(replies)
+    monkeypatch.setattr(kap, "PACE", kap.Pace())
+    monkeypatch.setattr(kap, "_base_url", lambda: "http://gateway")
+    monkeypatch.setattr(kap, "_auth", lambda: ("k", "s"))
+    monkeypatch.setattr(kap.requests, "get", lambda *a, **k: queue.pop(0))
+    monkeypatch.setattr(kap.time, "sleep", waits.append)
+    return kap, waits
+
+
+def test_a_refusal_widens_the_spacing_and_accepted_calls_narrow_it_again(monkeypatch):
+    kap, waits = _paced(monkeypatch, [_Reply(429), _Reply(200)] + [_Reply(200)] * 70)
+    assert kap.api_get("/x") == {"ok": True}
+    # The refusal names no wait: the default applies, then the wider spacing.
+    assert waits == [config.KAP_RATE_LIMIT_WAIT_SECONDS,
+                     config.KAP_THROTTLE_SECONDS + config.KAP_THROTTLE_STEP_SECONDS]
+    for _ in range(70):
+        kap.api_get("/x")
+    assert kap.PACE.spacing == config.KAP_THROTTLE_SECONDS      # back to the plan's spacing
+    assert min(waits[1:]) >= config.KAP_THROTTLE_SECONDS         # never faster than the plan
+
+
+def test_the_gateways_own_wait_is_used_and_refusals_do_not_use_up_attempts(monkeypatch):
+    kap, waits = _paced(monkeypatch, [_Reply(429, "20")] * 8 + [_Reply(200)])
+    assert kap.api_get("/x", attempts=3) == {"ok": True}        # eight refusals, three attempts
+    assert waits[0] == 20 and kap.PACE.refusals == 8
+    assert kap.PACE.spacing <= config.KAP_THROTTLE_MAX_SECONDS
+    # A wait the gateway names is never shorter than the current spacing.
+    assert all(w >= 20 for w in waits[:8])
+
+
+def test_pacing_cannot_exceed_its_ceiling_and_ignores_a_nonsense_header(monkeypatch):
+    from stock_research.data import kap
+
+    pace = kap.Pace()
+    for _ in range(50):
+        wait = pace.refused("soon")
+        assert wait == config.KAP_RATE_LIMIT_WAIT_SECONDS
+    assert pace.spacing == config.KAP_THROTTLE_MAX_SECONDS

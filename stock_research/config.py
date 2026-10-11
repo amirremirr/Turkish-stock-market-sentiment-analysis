@@ -50,6 +50,15 @@ KAP_ANCHOR_FRAME_BLOCKS = 80
 KAP_ANCHOR_FRAME_STRIDE = 37
 KAP_LISTING_TYPES = ("ODA", "CA")   # material events and structured corporate-action forms
 KAP_THROTTLE_SECONDS = 11           # free plan: 6 calls/minute
+#: The gateway's allowance is not constant: on 2026-10-11 it began refusing
+#: about one call in four at this spacing. Each refusal costs a long wait, so
+#: the ingester widens its spacing after one, up to this many seconds, and
+#: narrows it again after a run of calls that went through. Pacing decides
+#: how fast the sample arrives, never what is in it.
+KAP_THROTTLE_MAX_SECONDS = 30
+KAP_THROTTLE_STEP_SECONDS = 2       # added to the spacing after a refusal
+KAP_THROTTLE_RECOVERY_CALLS = 30    # successes in a row before the spacing narrows by one second
+KAP_RATE_LIMIT_WAIT_SECONDS = 65    # wait after a refusal that names no wait of its own
 KAP_TARGET_CLASSES = ("ODA",)
 KAP_LISTED_MEMBER_MARK = "IGS"      # "İşlem Gören Şirket": listed company
 #: How many times a disclosure detail the gateway refuses is asked for again.

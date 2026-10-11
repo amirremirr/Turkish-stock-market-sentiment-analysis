@@ -39,6 +39,7 @@ of nine, the specifications of H1–H6, H8 and H9, and the sealed-window guard.
 | 13 | Membership by `frame_version` on the listing row | Membership in `sr_kap_frame_items`; rows of earlier frames reused and not rewritten | Preserve raw observations and provenance | `store`, `kap.record_page` |
 | 14 | Up to 1% of details may be unavailable after one attempt | None. A refused detail is retried on 3 separate days; if any is still missing the run refuses and the case goes to review | Completeness questions 1 and 4 of the audit | `config.KAP_MAX_UNAVAILABLE_SHARE`, `KAP_MIN_ATTEMPT_DAYS`, `kap.progress` |
 | 15 | A refused detail retried once per ingestion run | Once per day | K-3 | `kap._may_ask` |
+| 15a | Fixed 11 s between calls; a rate-limit refusal waits 65 s and uses up one of five attempts | Spacing widens by 2 s after a refusal (ceiling 30 s) and narrows by 1 s after 30 accepted calls (floor 11 s); the gateway's `Retry-After` is honoured; a refusal does not use up an attempt | On 2026-10-11 the gateway began refusing one call in four, tripling the time per call. Pacing changes how fast the sample arrives, not what is in it | `kap.Pace`, `config.KAP_THROTTLE_*` |
 | 16 | Stored details counted | Stored details verified: parseable timestamp, subject, payload hash | A detail with no timestamp has no day 0 | `kap.verify_details` |
 
 ## Prices
