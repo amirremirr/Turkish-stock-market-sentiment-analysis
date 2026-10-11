@@ -96,11 +96,55 @@ def _auth():
     return key, secret
 
 
+#: Pacing (added 2026-10-11 for the last anchors of the v2 sample, after the
+#: gateway began refusing about one call in four at the fixed spacing). It
+#: decides how fast the sample arrives, never what is in it: the frame,
+#: ``is_target``, ``body_text`` and ``detail_row`` are unchanged.
+THROTTLE_MAX_SECONDS = 30
+THROTTLE_STEP_SECONDS = 2
+THROTTLE_RECOVERY_CALLS = 30
+RATE_LIMIT_WAIT_SECONDS = 65
+
+
+class Pace:
+    """Seconds to leave between calls, adjusted to what the gateway allows."""
+
+    def __init__(self) -> None:
+        self.spacing = float(KAP_THROTTLE_SECONDS)
+        self.accepted_in_a_row = 0
+        self.refusals = 0
+
+    def accepted(self) -> float:
+        self.accepted_in_a_row += 1
+        if self.accepted_in_a_row >= THROTTLE_RECOVERY_CALLS:
+            self.accepted_in_a_row = 0
+            self.spacing = max(float(KAP_THROTTLE_SECONDS), self.spacing - 1.0)
+        return self.spacing
+
+    def refused(self, retry_after: Optional[str] = None) -> float:
+        self.refusals += 1
+        self.accepted_in_a_row = 0
+        self.spacing = min(float(THROTTLE_MAX_SECONDS), self.spacing + THROTTLE_STEP_SECONDS)
+        try:
+            named = float(retry_after) if retry_after is not None else None
+        except (TypeError, ValueError):
+            named = None
+        if named is None or not (0 < named <= 600):
+            return float(RATE_LIMIT_WAIT_SECONDS)
+        return max(named, self.spacing)
+
+
+PACE = Pace()
+
+
 def api_get(path: str, params: Optional[dict] = None, *, attempts: int = 5) -> Any:
-    """GET with the plan's throttle. Sleeps after every call, success or not."""
+    """GET at the pace the gateway allows. Sleeps after every call. A
+    rate-limit refusal does not use up an attempt."""
 
     last_error = None
-    for _ in range(attempts):
+    tries = refusals = 0
+    while tries < attempts:
+        tries += 1
         try:
             response = requests.get(_base_url() + path, params=params,
                                     auth=_auth(), timeout=90)
@@ -110,9 +154,15 @@ def api_get(path: str, params: Optional[dict] = None, *, attempts: int = 5) -> A
             continue
         if response.status_code == 429:
             last_error = "429"
-            time.sleep(65)
+            refusals += 1
+            wait = PACE.refused(response.headers.get("Retry-After"))
+            logger.info("rate limited (Retry-After=%s): waiting %.0f s, spacing now %.0f s",
+                        response.headers.get("Retry-After"), wait, PACE.spacing)
+            time.sleep(wait)
+            if refusals <= 20:
+                tries -= 1
             continue
-        time.sleep(KAP_THROTTLE_SECONDS)
+        time.sleep(PACE.accepted())
         if response.status_code >= 500:
             last_error = f"HTTP {response.status_code}"
             time.sleep(30)
