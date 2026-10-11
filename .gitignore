@@ -68,3 +68,4 @@ stock_research.db
 stock_research.db-*
 stock_research_ingest.*
 outputs/stock_research/
+finance_sentiment.db-*

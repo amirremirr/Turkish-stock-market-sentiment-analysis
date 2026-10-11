@@ -1,7 +1,7 @@
 """Reading a "Pay Alım Satım Bildirimi" (share purchase/sale notification).
 
-Written against real forms from the 2023 sample. Three things about them are
-easy to get wrong and each would corrupt H8:
+Written against real forms from the 2023 sample. Four things about them are
+easy to get wrong, and each would corrupt H8:
 
 1. **The filer is often not the issuer.** A parent or shareholder files the
    form and names the company whose shares it traded in the "related
@@ -9,12 +9,19 @@ easy to get wrong and each would corrupt H8:
 2. **Companies report buybacks on this form too.** A filer trading its own
    shares ("kendi paylarının geri alımı") is a buyback, which H8 excludes.
 3. **The numbers are in a table after a block of headers,** one row per
-   transaction date: date, nominal bought, nominal sold, net, then holdings.
+   transaction date: date, nominal bought, nominal sold, net, holdings at the
+   start of the day, holdings at the end, then percentages.
+4. **A blank cell disappears.** In the extracted text an empty "bought" or
+   "sold" cell leaves no trace, so a sale of 190,000 reads
+   ``190.000 190.000 22.966.000 22.776.000`` -- which looks like a purchase
+   and a sale of 190,000 each. The side is therefore never read from the
+   position of a number. It is read from the **change in holdings**, and a
+   row is accepted only if its amounts reconcile with that change.
 
-What is parsed: the side (from the summed table rows), the nominal amounts,
-the mid-point of the disclosed price range, and who the counterparty is in
-relation to the issuer. Anything not read with confidence stays unparsed, and
-an unparsed form is not an event.
+What is parsed: the side and nominal amounts (from reconciled rows), the
+midpoint of the disclosed price range, and who the counterparty is in relation
+to the issuer. Anything not read with confidence stays unparsed, and an
+unparsed form is not an event.
 
 Not open-market purchases, excluded where the text shows it: transfers and
 off-exchange deals, option exercises, capital-increase allotments, inheritance
@@ -28,7 +35,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from stock_research.entities import fold
 
-INSIDER_PARSER_VERSION = "insider-parser-v2"
+INSIDER_PARSER_VERSION = "insider-parser-v3"
 
 PARSED = "parsed"
 UNPARSED = "unparsed"
@@ -38,27 +45,36 @@ KIND_THIRD_PARTY = "holder_trading_another_issuer"    # filer != issuer
 KIND_OWN_SHARES = "issuer_trading_own_shares"         # a buyback
 KIND_REPORTED_BY_ISSUER = "issuer_reporting_a_holder" # filer == issuer, not own shares
 
+#: Stems that mark a transaction as not an on-exchange purchase or sale.
+#: "bedelli" alone is not one: "190.000 TL nominal bedelli" means "with a
+#: nominal value of", so the capital-increase stems name the increase.
 _EXCLUSION_STEMS = (
     "borsa disi", "borsa disinda", "devir", "devri", "devral", "virman", "opsiyon",
-    "bedelsiz", "bedelli", "sermaye artirim", "miras", "bagis", "hibe",
+    "bedelli sermaye", "bedelsiz sermaye", "bedelsiz pay", "sermaye artirim", "ruchan",
+    "miras", "bagis", "hibe",
 )
 _OWN_SHARE_PHRASES = ("kendi paylari", "geri alim", "geri alinan", "pay geri al")
+_VENUE_PHRASES = ("borsa istanbul", "borsa'da", "borsada", "bias")
 _ROLE_PHRASES = (
     ("yonetim kurulu baskani", "board_chair"),
     ("yonetim kurulu uyesi", "board_member"),
     ("genel mudur", "general_manager"),
     ("yonetici", "executive"),
     ("ortakligimizca", "filer_is_holder"),
+    ("hissedar", "shareholder"),
+    ("pay sahibi", "shareholder"),
     ("ortagi", "shareholder"),
 )
-_ROW = re.compile(
-    r"(\d{2}[/.]\d{2}[/.]\d{4})\s+(-?[\d.]+(?:,\d+)?)\s+(-?[\d.]+(?:,\d+)?)\s+(-?[\d.]+(?:,\d+)?)"
-)
+_TABLE_MARKER = "Pay Alım Satım Bilgileri İşlem Tarihi"
+_DATE = re.compile(r"\d{2}[/.]\d{2}[/.]\d{4}")
+_NUMBER = re.compile(r"-?\d[\d.]*(?:,\d+)?")
 # Prices are read from the original text: folding turns the decimal comma
 # into a space.
 _PRICE_RANGE = re.compile(
     r"(\d+(?:,\d+)?)\s*-\s*(\d+(?:,\d+)?)\s*TL\s*fiyat\s*aral", re.IGNORECASE)
 _SINGLE_PRICE = re.compile(r"(\d+(?:,\d+)?)\s*TL\s*(?:ortalama\s*)?fiyat(?!\s*aral)", re.IGNORECASE)
+#: Relative tolerance when reconciling amounts with the change in holdings.
+RECONCILE_TOLERANCE = 0.01
 
 
 def turkish_number(text: str) -> Optional[float]:
@@ -71,27 +87,51 @@ def turkish_number(text: str) -> Optional[float]:
         return None
 
 
-def transaction_rows(body: Optional[str]) -> List[Dict[str, Any]]:
-    """Rows of the transaction table: date, nominal bought, nominal sold.
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= RECONCILE_TOLERANCE * max(abs(a), abs(b), 1.0)
 
-    Only text after the table's last header is searched, so a date and
-    figures in the free-text explanation are not read as a row.
+
+def transaction_rows(body: Optional[str]) -> List[Dict[str, Any]]:
+    """Reconciled rows of the transaction table.
+
+    Each row is the text from one date to the next. The figures before the
+    first percentage sign are, at most: bought, sold, net, holdings at the
+    start, holdings at the end. The last two are always present. A row is
+    returned only if what precedes them agrees with ``end - start``; otherwise
+    it is marked ``reconciled: False`` and the form will not be parsed.
     """
 
     text = body or ""
-    marker = "Pay Alım Satım Bilgileri İşlem Tarihi"
-    start = text.rfind(marker)
+    start = text.rfind(_TABLE_MARKER)
     if start < 0:
         return []
     table = text[start:]
     header_end = table.rfind("(%)")
     table = table[header_end + 3:] if header_end >= 0 else table
-    rows = []
-    for match in _ROW.finditer(table):
-        bought, sold = turkish_number(match.group(2)), turkish_number(match.group(3))
-        if bought is None or sold is None:
-            continue
-        rows.append({"date": match.group(1), "bought": bought, "sold": sold})
+
+    dates = list(_DATE.finditer(table))
+    rows: List[Dict[str, Any]] = []
+    for position, match in enumerate(dates):
+        end = dates[position + 1].start() if position + 1 < len(dates) else len(table)
+        cell_text = table[match.end():end].split("%")[0]
+        numbers = [turkish_number(n) for n in _NUMBER.findall(cell_text)]
+        numbers = [n for n in numbers if n is not None]
+        row: Dict[str, Any] = {"date": match.group(0), "bought": None, "sold": None,
+                               "reconciled": False}
+        if len(numbers) >= 3:
+            begin, finish = numbers[-2], numbers[-1]
+            change = finish - begin
+            amounts = numbers[:-2]
+            if len(amounts) >= 3:                 # bought, sold, net all present
+                bought, sold = amounts[0], amounts[1]
+                if _close(bought - sold, change):
+                    row.update({"bought": bought, "sold": sold, "reconciled": True})
+            elif amounts and _close(abs(amounts[0]), abs(change)) and change != 0:
+                # One of the two cells was blank; the holdings say which.
+                amount = abs(amounts[0])
+                row.update({"bought": amount if change > 0 else 0.0,
+                            "sold": amount if change < 0 else 0.0, "reconciled": True})
+        rows.append(row)
     return rows
 
 
@@ -117,14 +157,15 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
         "insider_parse_status": UNPARSED, "insider_kind": None, "insider_side": None,
         "insider_buy_nominal": None, "insider_sell_nominal": None,
         "insider_price_mid": None, "insider_value": None, "insider_role": None,
-        "insider_exclusion": None,
+        "insider_exclusion": None, "insider_venue_stated": None,
     }
     folded = fold(body)
     if not folded:
         return out
     out["insider_kind"] = transaction_kind(body, summary, sender_codes, related_codes)
 
-    explanation = folded.split("pay alim satim bilgileri islem tarihi")[0]
+    explanation = folded.split(fold(_TABLE_MARKER))[0]
+    out["insider_venue_stated"] = any(phrase in explanation for phrase in _VENUE_PHRASES)
     for stem in _EXCLUSION_STEMS:
         if re.search(rf"(?<![a-z]){re.escape(stem)}", explanation):
             out.update({"insider_parse_status": EXCLUDED, "insider_exclusion": stem})
@@ -135,8 +176,8 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
             break
 
     rows = transaction_rows(body)
-    if not rows:
-        return out
+    if not rows or not all(row["reconciled"] for row in rows):
+        return out                      # no table, or a row that does not add up
     bought, sold = sum(r["bought"] for r in rows), sum(r["sold"] for r in rows)
     out.update({"insider_buy_nominal": bought, "insider_sell_nominal": sold})
     if bought > 0 and sold == 0:
@@ -149,7 +190,7 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
         return out
 
     price = None
-    raw_explanation = (body or "").split("Pay Alım Satım Bilgileri İşlem Tarihi")[0]
+    raw_explanation = (body or "").split(_TABLE_MARKER)[0]
     span = _PRICE_RANGE.search(raw_explanation)
     if span:
         low, high = turkish_number(span.group(1)), turkish_number(span.group(2))
@@ -161,7 +202,7 @@ def parse_insider(body: Optional[str], summary: Optional[str] = None,
             price = turkish_number(single.group(1))
     if price and out["insider_side"] == "buy":
         # Nominal value is 1 TL per share on Borsa Istanbul, so nominal bought
-        # is the share count; value is an estimate at the range mid-point.
+        # is the share count; value is an estimate at the range midpoint.
         out.update({"insider_price_mid": price, "insider_value": bought * price})
     out["insider_parse_status"] = PARSED
     return out

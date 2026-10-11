@@ -141,17 +141,50 @@ def test_sales_mixed_days_transfers_and_unreadable_forms():
                                        "01/03/2023 0 120.000 -120.000 500.000 380.000 % 5 % 4"))
     assert sale["insider_side"] == "sell" and sale["insider_value"] is None
     mixed = insider.parse_insider(_form("işlemler gerçekleştirilmiştir.",
-                                        "01/03/2023 10.000 0 10.000 1 2 % 1 % 1 "
-                                        "02/03/2023 0 4.000 -4.000 2 3 % 1 % 1"))
+                                        "01/03/2023 10.000 0 10.000 50.000 60.000 % 1 % 1 "
+                                        "02/03/2023 0 4.000 -4.000 60.000 56.000 % 1 % 1"))
     assert (mixed["insider_side"], mixed["insider_buy_nominal"], mixed["insider_sell_nominal"]) == (
         "mixed", 10000.0, 4000.0)
     transfer = insider.parse_insider(_form("Borsa dışı devir işlemi ile paylar alınmıştır.",
-                                           "01/03/2023 10.000 0 10.000 1 2 % 1 % 1"))
+                                           "01/03/2023 10.000 0 10.000 50.000 60.000 % 1 % 1"))
     assert transfer["insider_parse_status"] == insider.EXCLUDED
     assert insider.parse_insider("Serbest metin, tablo yok")["insider_parse_status"] == insider.UNPARSED
     # A date and figures in the explanation are not a table row.
     stray = insider.parse_insider("01/03/2023 10.000 0 10.000 tarihli işlem")
     assert stray["insider_parse_status"] == insider.UNPARSED
+    # A table with headers and no rows (details in an attachment) is unparsed.
+    assert insider.parse_insider(_form("açıklama ekte yer almaktadır.", ""))[
+        "insider_parse_status"] == insider.UNPARSED
+
+
+def test_a_blank_table_cell_cannot_turn_a_sale_into_a_purchase():
+    """Real form 1205583: the "bought" cell is empty and leaves no trace, so the
+    row reads as two equal amounts. Holdings fell, so it is a sale."""
+
+    body = _form("Şirketimiz hissedarlarından Sn. X, 190.000 TL nominal bedelli 190.000 adedinin "
+                 "satışını Borsa İstanbul A.Ş. nezdinde gerçekleştirmiş olup",
+                 "12/10/2023 190.000 190.000 22.966.000 22.776.000 % 44,17 % 44,17 % 43,8 % 43,8")
+    parsed = insider.parse_insider(body, "Pay Alım Satım Bildirimi", ["SRVGY"], [])
+    # "nominal bedelli" is "with a nominal value of", not a rights issue.
+    assert parsed["insider_parse_status"] == insider.PARSED and parsed["insider_exclusion"] is None
+    assert (parsed["insider_side"], parsed["insider_sell_nominal"], parsed["insider_buy_nominal"]) == (
+        "sell", 190000.0, 0.0)
+    assert parsed["insider_venue_stated"] and parsed["insider_role"] == "shareholder"
+    # The mirror case: one amount, holdings rose.
+    bought = insider.parse_insider(_form("alış işlemi", "12/10/2023 5.000 5.000 100.000 105.000 % 1 % 1"))
+    assert (bought["insider_side"], bought["insider_buy_nominal"]) == ("buy", 5000.0)
+
+
+def test_a_row_that_does_not_reconcile_with_holdings_is_not_parsed():
+    # Claims 10,000 bought, but holdings went from 50,000 to 50,300.
+    odd = insider.parse_insider(_form("alış işlemi", "01/03/2023 10.000 0 10.000 50.000 50.300 % 1 % 1"))
+    assert odd["insider_parse_status"] == insider.UNPARSED and odd["insider_side"] is None
+    rows = insider.transaction_rows(_form("x", "01/03/2023 10.000 0 10.000 50.000 50.300 % 1 % 1"))
+    assert rows == [{"date": "01/03/2023", "bought": None, "sold": None, "reconciled": False}]
+    # A capital-increase allotment is excluded by name.
+    allot = insider.parse_insider(_form("Bedelli sermaye artırımı kapsamında alınan paylar",
+                                        "01/03/2023 10.000 0 10.000 50.000 60.000 % 1 % 1"))
+    assert allot["insider_parse_status"] == insider.EXCLUDED
 
 
 def test_event_builder_uses_related_issuer_for_holder_trades_and_prior_liquidity():
@@ -161,7 +194,7 @@ def test_event_builder_uses_related_issuer_for_holder_trades_and_prior_liquidity
     day = panel.calendar.sessions[200]
     stamp = f"{day[8:10]}.{day[5:7]}.{day[:4]} 11:00:00"
     body = _form("5,00-5,20 TL fiyat aralığından alış işlemi Ortaklığımızca gerçekleştirilmiştir.",
-                 "01/03/2023 1.000 0 1.000 1 2 % 1 % 1")
+                 "01/03/2023 1.000 0 1.000 20.000 21.000 % 1 % 1")
     details = pd.DataFrame([
         {"disclosure_index": 1, "sender_id": "9", "sender_title": "A", "sender_codes": '["AAAAA"]',
          "related_stocks": '[{"code": "BBBBB"}]', "published_raw": stamp, "disclosure_type": "ODA",

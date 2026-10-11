@@ -252,6 +252,35 @@ The corpus supports descriptive analysis (`analyze_corpus.py`). Checked-in findi
 
 The October 2026 snapshot (130 publication dates, 3,765 camp headlines) shows a pro-government minus opposition tone gap of **+0.255**, date-cluster bootstrap 95% CI **[0.234, 0.274]**, Cohen's d = **0.81**; it was +0.20 (d = 0.74) in July. Outlet means: Sabah **+0.13**, Anadolu Agency **+0.08**, Cumhuriyet **−0.15**, Sözcü **−0.18**, so the opposition result no longer rests on a single paper. The gap is largest on banking and the Turkish economy and smallest on energy and commodities. Headlines share dates, outlets, and stories, so the analysis leads with clustered uncertainty and diagnostics rather than the naive unclustered *p*-value. Same-story comparisons suggest selection contributes substantially to the aggregate difference, while same-event framing is less precisely estimated because verified shared-event coverage is limited. Measured against the market-focused press, both camps deviate and neither measurably dominates. A gap-widens-under-lira-stress hypothesis was tested and is not supported. These are observational snapshot results, not a causal political-bias claim. See the [dated findings](docs/polarization_findings.md) and the maintained [dependence-aware methods](docs/POLARIZATION_METHODS.md).
 
+## Stock-level study (in progress)
+
+A second, separate study asks nine pre-registered questions about individual
+stocks: how they react to company news and to KAP disclosures. It has its own
+package (`stock_research/`), database and protocol, and does not touch the
+index study above.
+
+Where it stands: the event-study engine, the nine hypothesis tests and their
+verdict rules are built and tested on synthetic data, and the protocol is
+registered. **No real result exists yet.** A systematic sample of 2023 KAP
+disclosures is still being collected, and the code will not compute an outcome
+on a partial sample. When it runs, two of the nine hypotheses can be tested on
+real data; the other seven will report `data_insufficient`, because the data
+they need (stock-level news at volume, historical market capitalisation,
+English-language news, intraday prices) is not available here.
+
+An audit of the implementation before any outcome was read found 22 issues
+and fixed 17; the other five are recorded as limitations. One of the fixed ones
+would have made a test with no real effect report one about half the time. See [the audit](docs/stock_research/AUDIT_REPORT.md),
+[data availability](docs/stock_research/DATA_AVAILABILITY.md),
+[the hypothesis registry](docs/stock_research/HYPOTHESIS_REGISTRY.md) and
+[limitations](docs/stock_research/LIMITATIONS.md).
+
+```bash
+python -m stock_research.cli status   # protocol hash and sample progress
+python -m stock_research.cli demo     # every hypothesis on synthetic data
+python -m pytest tests/stock_research
+```
+
 ## Run it
 
 ```bash

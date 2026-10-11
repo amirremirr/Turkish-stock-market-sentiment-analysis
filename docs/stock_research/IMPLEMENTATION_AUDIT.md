@@ -76,12 +76,16 @@ Measured on the dev gateway:
   roster**, not a point-in-time history: companies delisted before the snapshot
   are absent, and tickers are today's.
 
-**Change:** a pre-specified systematic sample of 120 listing blocks spread
-evenly over the index range (`kap-block-sample-v1`), fixed before any price was
-read. Production access (requested from MKK) would lift the rate problem only
-partly; the sampling design stays valid either way.
+**Change:** a pre-specified systematic sample, fixed before any price was
+read. The first design (`kap-block-sample-v1`, 120 unfiltered listing blocks)
+was abandoned after 9 blocks, still before any price was read: two thirds of
+all disclosures are daily fund bulletins, so a block held about four usable
+events. The design in use (`kap-anchor-sample-v2`) takes 80 evenly spaced
+anchors and, at each, the next 50 material-event disclosures. Production
+access would lift the rate problem only partly; the sampling design stays
+valid either way.
 
-### 3.4 Prices: available, with three known defects
+### 3.4 Prices: available, with known defects
 
 Yahoo Finance serves daily OHLCV, dividends and splits for `.IS` tickers,
 including small caps, back to 2000 for older listings. Verified live for
@@ -159,7 +163,16 @@ implemented and tested on synthetic data with known answers, and reports
 The honest expectation before running anything: two hypotheses can be tested
 on real data, and seven will report why they cannot.
 
-## 7. Planned changes
+## 7. What happened after this audit
+
+This document records the state before anything was built. Building and then
+auditing the implementation found more: four further defects in the
+provider's price bars, the filer-versus-issuer problem on share transaction
+forms, and an inference flaw that would have invalidated the testable
+hypotheses. Those are in [AUDIT_REPORT.md](AUDIT_REPORT.md). Current data
+facts are in [DATA_AVAILABILITY.md](DATA_AVAILABILITY.md).
+
+## 8. Planned changes (as written before implementation)
 
 1. `stock_research/` package: store, calendar, providers, prices, KAP ingester,
    taxonomy, entity linker, event-study engine, inference, costs, nine

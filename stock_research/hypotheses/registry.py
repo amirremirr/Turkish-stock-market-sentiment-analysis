@@ -25,7 +25,8 @@ PROTOCOL_VERSION = "stock-research-protocol-v1"
 #: Files that cannot change a registered result: fixtures and the report
 #: renderer only display, the CLI only dispatches, and the ingester only
 #: fetches. Everything else under stock_research/ is fingerprinted.
-_NOT_RESULT_BEARING = {"fixtures.py", "reporting.py", "cli.py", "data/kap.py"}
+_NOT_RESULT_BEARING = {"fixtures.py", "reporting.py", "cli.py", "data/kap.py",
+                       "registry_doc.py"}
 
 MODULES = (h1, h2, h3, h4, h5, h6, h7, h8, h9)
 SPECS = {module.SPEC.id: module.SPEC for module in MODULES}
