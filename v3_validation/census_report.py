@@ -66,6 +66,51 @@ def _why_missing(panel, ticker: str, day0: str) -> str:
             else "estimation: fewer than 60 returns")
 
 
+def ingester_provenance(db) -> list:
+    """Which ingester fetched which disclosure details.
+
+    A run is identified by its row in ``sr_ingest_log`` (ingester hash, code
+    commit). A detail belongs to the run that was the latest to have started
+    when the detail was retrieved. For each run: how many details, their
+    range of disclosure numbers, the frame blocks they fall in, and when.
+    """
+
+    con = sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)
+    try:
+        log = pd.read_sql_query(
+            "SELECT event_id, run_id, event, at, frame_version, ingester_sha256, code_commit "
+            "FROM sr_ingest_log ORDER BY event_id", con)
+        details = pd.read_sql_query(
+            "SELECT d.disclosure_index, d.retrieved_at, l.frame_version, l.block_seq "
+            "FROM sr_raw_kap_detail d JOIN sr_raw_kap_listing l USING (disclosure_index) "
+            "ORDER BY d.retrieved_at", con)
+    finally:
+        con.close()
+    starts = log[log["event"].isin(["start", "attested"])].sort_values("at").reset_index(drop=True)
+    finished = set(log.loc[log["event"].isin(["finish", "attested_end"]), "run_id"])
+    out = []
+    for k, run in starts.iterrows():
+        until = starts["at"].iloc[k + 1] if k + 1 < len(starts) else "9999"
+        part = details[(details["retrieved_at"] >= run["at"]) & (details["retrieved_at"] < until)]
+        out.append({
+            "run_id": run["run_id"], "started": run["at"], "frame": run["frame_version"],
+            "ingester_sha256": run["ingester_sha256"], "code_commit": run["code_commit"],
+            "how_recorded": "attested afterwards" if run["event"] == "attested" else "logged at start",
+            "ended": "finish logged" if run["run_id"] in finished else "no finish row (stopped, or still running)",
+            "details_fetched": int(len(part)),
+            "disclosure_index_range": ([int(part["disclosure_index"].min()),
+                                        int(part["disclosure_index"].max())] if len(part) else None),
+            "retrieved_between": ([part["retrieved_at"].min(), part["retrieved_at"].max()]
+                                  if len(part) else None),
+            "blocks": sorted(f"{f}:{b}" for f, b in
+                             part[["frame_version", "block_seq"]].drop_duplicates().itertuples(index=False)),
+        })
+    assigned = sum(r["details_fetched"] for r in out)
+    out.append({"details_total": int(len(details)), "details_assigned_to_a_run": assigned,
+                "details_before_any_logged_run": int(len(details) - assigned)})
+    return out
+
+
 def run(db: Path = snap.COPY) -> Dict[str, Any]:
     db = str(db)
     progress = kap.progress(db)
@@ -151,7 +196,8 @@ def run(db: Path = snap.COPY) -> Dict[str, Any]:
             "refusals_by_http_status": failures["http_status"].value_counts().to_dict(),
             "refusal_days_per_disclosure": failures.groupby("disclosure_index")["day"]
             .nunique().to_dict()},
-        "ingestion_log": log, "protocols_registered": protocols, "results_stored": int(results),
+        "ingestion_log": log, "ingester_provenance": ingester_provenance(db),
+        "protocols_registered": protocols, "results_stored": int(results),
         "price_coverage": coverage, "price_reconciliation": {
             k: (v if k != "tickers_without_second_source" else len(v))
             for k, v in panel.reconciliation.items()},
