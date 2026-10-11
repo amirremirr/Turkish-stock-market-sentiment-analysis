@@ -35,9 +35,11 @@ LEVELS = (ALPHA, HOLM)
 PIECES = snap.OUT / "pieces"
 DOCS = REPOSITORY_ROOT / "docs" / "stock_research" / "protocol_v3" / "validation"
 PROCEDURES = ("v2_two_way_f", "wild_date_statistic", "wild_two_way_statistic", "cr2_satterthwaite_date")
-POWER_CASES = [("one:buyback", 0.01), ("one:buyback", 0.015), ("one:buyback", 0.02),
+POWER_CASES = [("one:buyback", 0.005), ("one:buyback", 0.01), ("one:buyback", 0.015), ("one:buyback", 0.02),
                ("one:buyback", 0.03), ("one:new_contract", 0.02), ("one:new_contract", 0.03),
-               ("one:dividend", 0.03), ("all", 0.02)]
+               ("one:dividend", 0.02), ("one:dividend", 0.03), ("one:debt_issuance", 0.02),
+               ("one:debt_issuance", 0.03), ("one:rights_issue", 0.03), ("one:bonus_issue", 0.03),
+               ("one:asset_acquisition", 0.03), ("all", 0.01), ("all", 0.02)]
 
 
 def _persistence(meta: Dict[str, Any], factor: float = 1.0, **fixed: float) -> Dict[str, float]:
@@ -70,6 +72,10 @@ def _builders() -> Dict[str, Dict[str, Any]]:
                                "fixed": {"buyback": 0.9}, "common_share": 0.20},
         "v3_census_serial25": {"anchors_total": designs.CENSUS_ANCHORS, "persistence": 2.0,
                                "fixed": {"buyback": 0.9}, "ar1": 0.25},
+        # The real census structure, once it exists (no projection).
+        "census_actual": {"actual": True},
+        "census_actual_common20": {"actual": True, "common_share": 0.20},
+        "census_actual_serial25": {"actual": True, "ar1": 0.25},
         "controlled_minimum": {"controlled": {"small": (30, 20, 20)}},
         "controlled_programme": {"controlled": {"small": (120, 40, 20), "programme": True}},
     }
@@ -81,6 +87,11 @@ def draw_design(name: str, rng: np.random.Generator):
         calibration = json.loads((designs.AUDIT_OUT / "calibration.json").read_text(encoding="utf-8"))
         return designs.audit_design(rng), calibration, spec
     rows, calibration, meta = designs.inputs()
+    if spec.get("actual"):
+        design = designs.actual(rows, calibration, rng)
+        if design is None:
+            raise RuntimeError("the real structure does not meet the registered minimums")
+        return design, calibration, spec
     if "controlled" in spec:
         return designs.controlled(calibration, rng, **spec["controlled"]), calibration, spec
     persistence = None

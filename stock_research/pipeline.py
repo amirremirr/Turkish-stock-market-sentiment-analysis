@@ -173,7 +173,7 @@ def gates(db_path=None, panel: Optional[prices.Panel] = None) -> Dict[str, Dict[
                       f"are unavailable ({frame['details_awaiting_another_attempt']} not yet "
                       f"refused on {frame['attempt_days_required']} separate days; registered "
                       f"share {frame['max_unavailable_share']:.1%}). Rerun `ingest-kap` on a "
-                      "later day"},
+                      "later day; if refusals remain after that, stop for review"},
         "details_verified": {
             "passed": bool(verified["verified"]),
             "reason": f"{len(verified['timestamp_unparseable'])} stored details have a "

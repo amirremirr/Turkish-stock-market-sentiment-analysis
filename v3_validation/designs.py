@@ -185,6 +185,17 @@ def _design(events: pd.DataFrame, calibration: Dict[str, Any], rng: np.random.Ge
                         sessions, anchors)
 
 
+def actual(rows: pd.DataFrame, calibration: Dict[str, Any],
+           rng: np.random.Generator, sessions: Optional[int] = None) -> Optional[power.Design]:
+    """The sample as it is: the eligible, thinned rows of the structure file,
+    with their real issuers and sessions and no projection. For the final
+    calibration once the census exists. Still structure only."""
+
+    events = rows[rows["kept_by_thinning"]][["ticker", "group", "position"]].reset_index(drop=True)
+    return _design(events, calibration, rng, 0,
+                   sessions or int(events["position"].max()) + 25)
+
+
 def controlled(calibration: Dict[str, Any], rng: np.random.Generator, *,
                small=(30, 20, 20), programme: bool = False) -> power.Design:
     """A reference group and three large classes, plus one class of the given

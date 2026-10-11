@@ -37,7 +37,7 @@ of nine, the specifications of H1–H6, H8 and H9, and the sealed-window guard.
 | --- | --- | --- | --- | --- |
 | 12 | Frame `kap-anchor-sample-v2`: 80 anchors of 50 | Frame `kap-census-2023-v3`: every target disclosure in the same range, read page by page | W-1 | `config.KAP_FRAME_*`, `data/kap.py` |
 | 13 | Membership by `frame_version` on the listing row | Membership in `sr_kap_frame_items`; rows of earlier frames reused and not rewritten | Preserve raw observations and provenance | `store`, `kap.record_page` |
-| 14 | Up to 1% of details may be unavailable after one attempt | None, unless refused on 3 separate days; then at most 0.1%, listed by number | Completeness questions 1 and 4 of the audit | `config.KAP_MAX_UNAVAILABLE_SHARE`, `KAP_MIN_ATTEMPT_DAYS`, `kap.progress` |
+| 14 | Up to 1% of details may be unavailable after one attempt | None. A refused detail is retried on 3 separate days; if any is still missing the run refuses and the case goes to review | Completeness questions 1 and 4 of the audit | `config.KAP_MAX_UNAVAILABLE_SHARE`, `KAP_MIN_ATTEMPT_DAYS`, `kap.progress` |
 | 15 | A refused detail retried once per ingestion run | Once per day | K-3 | `kap._may_ask` |
 | 16 | Stored details counted | Stored details verified: parseable timestamp, subject, payload hash | A detail with no timestamp has no day 0 | `kap.verify_details` |
 

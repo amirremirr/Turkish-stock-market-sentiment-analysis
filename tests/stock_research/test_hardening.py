@@ -292,13 +292,15 @@ def test_real_run_needs_complete_retrieval_or_three_refusals_within_the_share(tm
     with pytest.raises(pipeline.NotReady, match="unavailable"):
         pipeline.run_real(waiting, index_db=tmp_path / "none.db")
 
-    # Three refusals on three days, but one in 361 is above the registered 0.1%.
+    # Three refusals on three days: still refused, because the registered
+    # share is zero. Going on without a disclosure is a decision, not a default.
     refused = _database(str(tmp_path / "refused.db"))
     _gap(refused, 9_000_001, days=("2026-11-01", "2026-11-02", "2026-11-03"))
     registry.register(refused)
     with pytest.raises(pipeline.NotReady, match="unavailable"):
         pipeline.run_real(refused, index_db=tmp_path / "none.db")
     assert kap.progress(refused)["details_awaiting_another_attempt"] == 0
+    assert kap.KAP_MAX_UNAVAILABLE_SHARE == 0.0
 
     # Within the share (raised here), the run proceeds and names the gap.
     monkeypatch.setattr(kap, "KAP_MAX_UNAVAILABLE_SHARE", 0.01)

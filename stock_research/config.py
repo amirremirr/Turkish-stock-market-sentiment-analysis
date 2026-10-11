@@ -55,12 +55,15 @@ KAP_LISTED_MEMBER_MARK = "IGS"      # "İşlem Gören Şirket": listed company
 #: How many times a disclosure detail the gateway refuses is asked for again.
 KAP_MAX_DETAIL_ATTEMPTS = 3
 #: A census with a hole is not a census. The run needs every target
-#: disclosure retrieved. The one exception: a disclosure the gateway refused
-#: on ``KAP_MAX_DETAIL_ATTEMPTS`` separate days is accepted as unavailable, up
-#: to this share of targets, and is listed by number in the manifest. v2
-#: allowed 1% after a single attempt; with categories of 30 events that could
-#: have been most of a category.
-KAP_MAX_UNAVAILABLE_SHARE = 0.001
+#: disclosure retrieved: the share that may be unavailable is zero. A
+#: disclosure the gateway refuses is asked for again on
+#: ``KAP_MAX_DETAIL_ATTEMPTS`` separate days; if it is still missing the run
+#: refuses, and whether to proceed without it is a decision to be reviewed
+#: and registered as a new protocol, not a tolerance applied automatically
+#: (condition 6 of the approval of 2026-10-11). v2 allowed 1% after a single
+#: attempt; with categories of 30 events that could have been most of a
+#: category.
+KAP_MAX_UNAVAILABLE_SHARE = 0.0
 KAP_MIN_ATTEMPT_DAYS = 3
 
 # -- Event study ---------------------------------------------------------------

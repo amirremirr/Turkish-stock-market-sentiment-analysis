@@ -70,9 +70,9 @@ readiness audit checked the first two, and this branch did not touch them.
 
 | | v2 | v3 |
 | --- | --- | --- |
-| Unavailable details tolerated | 1% of targets | none, except as below |
+| Unavailable details tolerated | 1% of targets | none |
 | When a refused detail counts as unavailable | after one attempt | after 3 refusals on 3 separate days |
-| Share that may then be accepted | 1% | 0.1%, each listed by number in the manifest |
+| What happens then | the run proceeds | the run refuses; proceeding without the disclosure needs review and a new registration |
 | Retry cadence | once per ingestion run | once per day, whatever the number of runs |
 | Check of stored details | row count | every target detail must have a parseable timestamp and a subject (`kap.verify_details`) |
 

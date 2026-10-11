@@ -25,7 +25,7 @@ default shown is what the code on this branch does.
 | 10 | İş Yatırım as the second price source | Yes | A broker's public service, not the exchange. Its data are stored locally and not committed |
 | 11 | Tolerance of 1 return point | 0.01 | 1.1% of returns differ by more; 1.8% by more than half a point |
 | 12 | A return with no second-source counterpart is missing | Yes | Two stocks so far have no second-source series at all |
-| 13 | Complete retrieval, with at most 0.1% accepted after three refusals on three days | Yes | v2 allowed 1% after one attempt |
+| 13 | Complete retrieval; any disclosure still refused after three attempts on three days stops the run for review | Yes (approved 2026-10-11 with the condition that no tolerance is applied automatically) | v2 allowed 1% after one attempt |
 
 ## Steps that need a go-ahead, in order
 
