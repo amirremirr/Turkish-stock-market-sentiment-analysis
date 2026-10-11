@@ -1,0 +1,35 @@
+{
+ "date_only": {
+  "rejection_rate": 0.4896,
+  "ci": [
+   0.47574370545532463,
+   0.5034562945446753
+  ]
+ },
+ "two_way": {
+  "rejection_rate": 0.0484,
+  "ci": [
+   0.04245131507803615,
+   0.05434868492196385
+  ]
+ },
+ "issuer_only": {
+  "rejection_rate": 0.047,
+  "ci": [
+   0.041133670558176946,
+   0.052866329441823054
+  ]
+ },
+ "two_way_ci_coverage": 0.9516,
+ "runs": 5000,
+ "design": {
+  "issuers": 12,
+  "events": 120,
+  "window": [
+   1,
+   20
+  ],
+  "issuer_clusters": 12,
+  "date_clusters": "about 90"
+ }
+}

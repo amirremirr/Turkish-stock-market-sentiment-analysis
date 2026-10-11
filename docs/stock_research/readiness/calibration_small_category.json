@@ -1,0 +1,152 @@
+[
+ {
+  "fifth_category_events": 30,
+  "fifth_category_dates": 15,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.07033333333333333,
+  "registered_ci_at_0.0500": [
+   0.06118294186953569,
+   0.07948372479713098
+  ],
+  "min_category_dof_rate_at_0.0500": 0.015666666666666666,
+  "min_category_dof_ci_at_0.0500": [
+   0.011222863217334518,
+   0.020110470115998813
+  ],
+  "registered_rate_at_0.0056": 0.012333333333333333,
+  "registered_ci_at_0.0056": [
+   0.008383844620057108,
+   0.01628282204660956
+  ],
+  "min_category_dof_rate_at_0.0056": 0.0003333333333333333,
+  "min_category_dof_ci_at_0.0056": [
+   0.0,
+   0.000986557768702191
+  ]
+ },
+ {
+  "fifth_category_events": 40,
+  "fifth_category_dates": 22,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.069,
+  "registered_ci_at_0.0500": [
+   0.05993026015808613,
+   0.07806973984191388
+  ],
+  "min_category_dof_rate_at_0.0500": 0.027,
+  "min_category_dof_ci_at_0.0500": [
+   0.021199923172922623,
+   0.032800076827077376
+  ],
+  "registered_rate_at_0.0056": 0.013333333333333334,
+  "registered_ci_at_0.0056": [
+   0.009228929916585974,
+   0.017437736750080694
+  ],
+  "min_category_dof_rate_at_0.0056": 0.0016666666666666668,
+  "min_category_dof_ci_at_0.0056": [
+   0.0002069868438338699,
+   0.003126346489499464
+  ]
+ },
+ {
+  "fifth_category_events": 60,
+  "fifth_category_dates": 30,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.06333333333333334,
+  "registered_ci_at_0.0500": [
+   0.05461759567304532,
+   0.07204907099362136
+  ],
+  "min_category_dof_rate_at_0.0500": 0.031,
+  "min_category_dof_ci_at_0.0500": [
+   0.024797908352821606,
+   0.037202091647178394
+  ],
+  "registered_rate_at_0.0056": 0.006,
+  "registered_ci_at_0.0056": [
+   0.003236469504420116,
+   0.008763530495579885
+  ],
+  "min_category_dof_rate_at_0.0056": 0.001,
+  "min_category_dof_ci_at_0.0056": [
+   0.0,
+   0.002131040582826275
+  ]
+ },
+ {
+  "fifth_category_events": 90,
+  "fifth_category_dates": 45,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.06266666666666666,
+  "registered_ci_at_0.0500": [
+   0.053993837896647384,
+   0.07133949543668594
+  ],
+  "min_category_dof_rate_at_0.0500": 0.04066666666666666,
+  "min_category_dof_ci_at_0.0500": [
+   0.033598618516586486,
+   0.04773471481674684
+  ],
+  "registered_rate_at_0.0056": 0.007,
+  "registered_ci_at_0.0056": [
+   0.004016547771456698,
+   0.009983452228543303
+  ],
+  "min_category_dof_rate_at_0.0056": 0.002,
+  "min_category_dof_ci_at_0.0056": [
+   0.0004012678356480929,
+   0.0035987321643519074
+  ]
+ },
+ {
+  "fifth_category_events": 150,
+  "fifth_category_dates": 60,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.058333333333333334,
+  "registered_ci_at_0.0500": [
+   0.049946414506528855,
+   0.06672025216013781
+  ],
+  "min_category_dof_rate_at_0.0500": 0.049666666666666665,
+  "min_category_dof_ci_at_0.0500": [
+   0.041892283665305605,
+   0.057441049668027724
+  ],
+  "registered_rate_at_0.0056": 0.009,
+  "registered_ci_at_0.0056": [
+   0.005620491633388075,
+   0.012379508366611924
+  ],
+  "min_category_dof_rate_at_0.0056": 0.004666666666666667,
+  "min_category_dof_ci_at_0.0056": [
+   0.002227827792970446,
+   0.007105505540362888
+  ]
+ },
+ {
+  "fifth_category_events": 300,
+  "fifth_category_dates": 80,
+  "simulations": 3000,
+  "registered_rate_at_0.0500": 0.05433333333333333,
+  "registered_ci_at_0.0500": [
+   0.046221898949516685,
+   0.06244476771714998
+  ],
+  "min_category_dof_rate_at_0.0500": 0.049,
+  "min_category_dof_ci_at_0.0500": [
+   0.041275262282769724,
+   0.05672473771723028
+  ],
+  "registered_rate_at_0.0056": 0.005333333333333333,
+  "registered_ci_at_0.0056": [
+   0.0027269782056019163,
+   0.00793968846106475
+  ],
+  "min_category_dof_rate_at_0.0056": 0.004666666666666667,
+  "min_category_dof_ci_at_0.0056": [
+   0.002227827792970446,
+   0.007105505540362888
+  ]
+ }
+]
